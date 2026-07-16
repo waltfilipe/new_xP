@@ -16,7 +16,13 @@ from sklearn.pipeline import Pipeline
 import passes_engine as pe
 import xp_study_engine as xse
 
-XP_DATA_CACHE_VERSION = 1
+XP_DATA_CACHE_VERSION = 2
+XP_POSITION_RANK_METRICS: tuple[str, ...] = (
+    "xp_m4_total",
+    "xp_m4_per_pass",
+    "xp_m4_threat_passes_p90",
+    "xp_m4_threat_rate",
+)
 XP_MODEL_VERSION = "m4_od_8x6_12x8_threat_q10_v1"
 THREAT_QUANTILE = 0.10
 XP_COL = "xp_m4"
@@ -327,6 +333,12 @@ def build_xp_analytics(
         metrics = compute_player_xp_metrics(grp)
         if not metrics:
             continue
+        minutes = mins.get("minutes")
+        threat_total = int(metrics.get("xp_m4_threat_passes", 0))
+        if minutes and float(minutes) > 0:
+            metrics["xp_m4_threat_passes_p90"] = float(threat_total) * 90.0 / float(minutes)
+        else:
+            metrics["xp_m4_threat_passes_p90"] = 0.0
         players.append({
             "player_id": pid,
             "player_name": player["name"],
@@ -342,7 +354,23 @@ def build_xp_analytics(
     players.sort(key=lambda p: float(p.get("xp_m4_total", 0.0)), reverse=True)
     for i, p in enumerate(players, start=1):
         p["xp_m4_rank"] = i
+    attach_xp_metric_ranks(players)
     return registry, players
+
+
+def attach_xp_metric_ranks(players: list[dict]) -> None:
+    """Attach within-position ranks for core xP dashboard metrics."""
+    pools: dict[str, list[dict]] = {}
+    for player in players:
+        group = str(player.get("position_group") or "CM")
+        pools.setdefault(group, []).append(player)
+    for rows in pools.values():
+        pool_size = len(rows)
+        for metric in XP_POSITION_RANK_METRICS:
+            rows.sort(key=lambda row: float(row.get(metric) or 0.0), reverse=True)
+            for rank, row in enumerate(rows, start=1):
+                row[f"{metric}_rank_in_group"] = rank
+                row[f"{metric}_rank_pool_in_group"] = pool_size
 
 
 def rank_xp_players_by_position(players: list[dict]) -> dict[str, list[dict]]:

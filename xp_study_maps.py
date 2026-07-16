@@ -174,3 +174,78 @@ def draw_top_xp_passes_map(
         color="white", fontsize=10, pad=8,
     )
     return fig
+
+
+def draw_xp_threat_passes_season_map(
+    passes,
+    *,
+    player_name: str,
+    season_label: str = "temporada",
+    distance_label: str = "todas as distâncias",
+    xp_col: str = "xp_m4",
+):
+    """Season map of xP threat passes for one player."""
+    fig, ax, pitch = _base_pitch()
+
+    if passes is None or passes.empty or xp_col not in passes.columns:
+        ax.text(
+            60, 40, "Sem xP Threat Passes",
+            ha="center", va="center", color="white", fontsize=10,
+        )
+        ax.set_title(
+            f"{player_name}\nxP Threat Passes · {distance_label} · {season_label}",
+            color="white", fontsize=10, pad=8,
+        )
+        return fig
+
+    work = passes.copy()
+    values = work[xp_col].to_numpy(dtype=float)
+    vmax = max(float(np.max(values)), 0.05)
+    norm = Normalize(vmin=0.0, vmax=min(vmax, XP_PASS_MAX))
+
+    for row in work.itertuples(index=False):
+        xp_value = float(getattr(row, xp_col))
+        color = CMAP_XP(norm(xp_value))
+        lw_scale = 0.85 + 0.35 * min(xp_value / XP_PASS_MAX, 1.0)
+        _delicate_arrows(
+            pitch, ax,
+            row.x_start, row.y_start, row.x_end, row.y_end,
+            color, alpha=0.92, lw_scale=lw_scale,
+        )
+        pitch.scatter(
+            row.x_start, row.y_start,
+            s=28, marker="o", color=color, edgecolors="white", linewidths=0.5, ax=ax, zorder=5,
+        )
+        pitch.scatter(
+            row.x_end, row.y_end,
+            s=36, marker="s", color=color, edgecolors="white", linewidths=0.5, ax=ax, zorder=6,
+        )
+
+    sm = ScalarMappable(norm=norm, cmap=CMAP_XP)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.02)
+    cbar.set_label("xP do passe", color="white", fontsize=8)
+    cbar.ax.yaxis.set_tick_params(color="white", labelcolor="white")
+
+    legend_handles = [
+        Line2D([0], [0], color=CMAP_XP(0.9), lw=2.0, label="xP Threat Pass"),
+        Line2D([0], [0], marker="o", color="w", markerfacecolor="#94a3b8", markersize=5, linestyle="None", label="Origem"),
+        Line2D([0], [0], marker="s", color="w", markerfacecolor="#94a3b8", markersize=5, linestyle="None", label="Destino"),
+    ]
+    leg = ax.legend(
+        handles=legend_handles,
+        loc="upper left",
+        bbox_to_anchor=(0.01, 0.99),
+        frameon=True,
+        facecolor="#1a1a2e",
+        edgecolor="#444466",
+        fontsize=7,
+    )
+    for text in leg.get_texts():
+        text.set_color("white")
+
+    ax.set_title(
+        f"{player_name}\n{len(work)} xP Threat Passes · {distance_label} · {season_label}",
+        color="white", fontsize=10, pad=8,
+    )
+    return fig
