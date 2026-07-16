@@ -4346,28 +4346,152 @@ def _xp_metric_ranks_dict(xp_profile: dict | None) -> dict:
     return ranks
 
 
-def _xp_stat_line_html(label: str, metric_key: str, value: str, xp_profile: dict | None) -> str:
-    return _metric_line_html(
-        label,
-        metric_key,
-        value,
-        _xp_metric_ranks_dict(xp_profile),
-        show_rank=True,
+XP_PASSING_SECTION_SPECS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    ("xp_pass_volume", "Pass xP", "", ("xp_m4_total", "xp_m4_per_pass")),
+    ("xp_threat", "xP Threat", "", ("xp_m4_threat_passes_p90", "xp_m4_threat_rate")),
+)
+
+XP_METRIC_LABELS: dict[str, str] = {
+    "xp_m4_total": "xP Total",
+    "xp_m4_per_pass": "xP/Passe",
+    "xp_m4_threat_passes_p90": "xP Threat Passes (Per game)",
+    "xp_m4_threat_rate": "% Threat Passes",
+}
+
+
+def _xp_metric_label(key: str) -> str:
+    return XP_METRIC_LABELS.get(key, key)
+
+
+def _xp_stat_display(profile: dict, key: str) -> str:
+    if key == "xp_m4_total":
+        return f"{float(profile.get(key, 0)):.1f}"
+    if key == "xp_m4_per_pass":
+        return f"{float(profile.get(key, 0)):.3f}"
+    if key == "xp_m4_threat_passes_p90":
+        return f"{float(profile.get(key, 0)):.2f}"
+    if key == "xp_m4_threat_rate":
+        return f"{100 * float(profile.get(key, 0)):.1f}%"
+    return "—"
+
+
+def _xp_section_metric_avg_rank_bar_html(xp_profile: dict, keys: tuple[str, ...]) -> str:
+    metric_ranks = _xp_metric_ranks_dict(xp_profile)
+    scores: list[float] = []
+    for key in keys:
+        info = metric_ranks.get(key)
+        if not info:
+            continue
+        rank = int(info.get("rank") or 0)
+        total = int(info.get("total") or 0)
+        if rank > 0 and total > 0:
+            scores.append(rank_to_display_score(rank, total))
+    if not scores:
+        return ""
+    avg_score = sum(scores) / len(scores)
+    color = score_display_color(avg_score)
+    width_pct = max(6.0, min(100.0, (avg_score - 3.0) / 6.0 * 100.0))
+    return (
+        f'<span class="rank-tip">'
+        f'<span class="rank-bar">'
+        f'<span class="rank-bar-fill" style="width:{width_pct:.0f}%;background:{color}"></span>'
+        f"</span>"
+        f'<span class="rank-tipbox">avg {avg_score:.1f}</span>'
+        f"</span>"
+    )
+
+
+def _xp_section_grade_summary_bits(
+    xp_profile: dict,
+    section_key: str,
+    title: str,
+    keys: tuple[str, ...] = (),
+    *,
+    show_section_bar: bool = False,
+) -> str:
+    _ = section_key
+    bar_html = ""
+    if show_section_bar and keys:
+        bar_html = _xp_section_metric_avg_rank_bar_html(xp_profile, keys)
+    title_row = (
+        f'<div class="grade-card-title-row">'
+        f'<div class="grade-card-title">{html.escape(title)}</div>'
+        f"{bar_html}"
+        f"</div>"
+    )
+    return (
+        f'<div class="grade-summary-main">'
+        f'<div class="grade-summary-top">'
+        f"{title_row}"
+        f"</div>"
+        f"</div>"
+    )
+
+
+def _xp_section_grade_body_html(xp_profile: dict, keys: tuple[str, ...]) -> str:
+    metric_ranks = _xp_metric_ranks_dict(xp_profile)
+    return "".join(
+        _metric_line_html(
+            _xp_metric_label(key),
+            key,
+            _xp_stat_display(xp_profile, key),
+            metric_ranks,
+            show_rank=True,
+            label_fn=_xp_metric_label,
+            tooltip_fn=lambda _key: "",
+        )
+        for key in keys
+    )
+
+
+def _xp_section_grade_accordion_html(
+    xp_profile: dict,
+    section_key: str,
+    title: str,
+    keys: tuple[str, ...],
+    *,
+    open: bool = False,
+    show_section_bar: bool = True,
+    accordion_name: str | None = None,
+) -> str:
+    summary_main = _xp_section_grade_summary_bits(
+        xp_profile,
+        section_key,
+        title,
+        keys,
+        show_section_bar=show_section_bar,
+    )
+    lines = _xp_section_grade_body_html(xp_profile, keys)
+    open_attr = " open" if open else ""
+    name_attr = f' name="{html.escape(accordion_name)}"' if accordion_name else ""
+    return (
+        f'<details class="grade-accordion"{name_attr}{open_attr}>'
+        "<summary>"
+        '<i class="fa-solid fa-chevron-right grade-arrow" aria-hidden="true"></i>'
+        f"{summary_main}"
+        "</summary>"
+        f'<div class="grade-accordion-body">{lines}</div>'
+        "</details>"
     )
 
 
 def _build_xp_stats_card_html(xp_profile: dict | None) -> str:
     profile = xp_profile or {}
+    passing_accordions = "".join(
+        _xp_section_grade_accordion_html(
+            profile,
+            section_key,
+            title,
+            keys,
+            open=False,
+            show_section_bar=True,
+            accordion_name="pa-pass-xp",
+        )
+        for section_key, title, _subtitle, keys in XP_PASSING_SECTION_SPECS
+    )
     passing_html = (
         '<p class="pa-pillar-group-label">Passing</p>'
-        '<div class="pa-pillar-group">'
-        '<p class="pa-subgroup-label">Pass xP</p>'
-        f'{_xp_stat_line_html("xP Total", "xp_m4_total", f"{float(profile.get("xp_m4_total", 0)):.1f}", profile)}'
-        f'{_xp_stat_line_html("xP/Passe", "xp_m4_per_pass", f"{float(profile.get("xp_m4_per_pass", 0)):.3f}", profile)}'
-        '<p class="pa-subgroup-label">xP Threat</p>'
-        f'{_xp_stat_line_html("xP Threat Passes (Per game)", "xp_m4_threat_passes_p90", f"{float(profile.get("xp_m4_threat_passes_p90", 0)):.2f}", profile)}'
-        f'{_xp_stat_line_html("% Threat Passes", "xp_m4_threat_rate", f"{100 * float(profile.get("xp_m4_threat_rate", 0)):.1f}%", profile)}'
-        "</div>"
+        f'<div class="pa-pillar-group">{passing_accordions}</div>'
         '<p class="pa-pillar-group-label">Carrying</p>'
         '<div class="pa-pillar-group pa-pillar-group-empty">'
         '<p class="pa-placeholder-note">Em breve</p>'
