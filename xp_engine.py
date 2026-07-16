@@ -16,14 +16,14 @@ from sklearn.pipeline import Pipeline
 import passes_engine as pe
 import xp_study_engine as xse
 
-XP_DATA_CACHE_VERSION = 3
+XP_DATA_CACHE_VERSION = 4
 XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total",
     "xp_m4_per_pass",
     "xp_m4_threat_passes_p90",
     "xp_m4_threat_rate",
 )
-XP_MODEL_VERSION = "m4_od_8x6_12x8_threat_q10_progress_v1"
+XP_MODEL_VERSION = "m4_od_8x6_12x8_threat_q10_progress_blend50_v1"
 THREAT_QUANTILE = 0.10
 XP_COL = "xp_m4"
 XP_EXPECTED_COL = "xp_expected"

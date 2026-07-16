@@ -1,15 +1,15 @@
 {
-  "version": "m4_od_8x6_12x8_threat_q10_progress_v1",
+  "version": "m4_od_8x6_12x8_threat_q10_progress_blend50_v1",
   "threat_quantile": 0.1,
   "residual_thresholds": {
-    "short": 0.09620388428557963,
-    "medium": 0.09367794014889504,
-    "long": 0.12269223714154134
+    "short": 0.09803915990464067,
+    "medium": 0.09600334875083064,
+    "long": 0.13540109770692316
   },
   "residual_threshold_labels": {
-    "<12 m": 0.09620388428557963,
-    "12\u201325 m": 0.09367794014889504,
-    ">25 m": 0.12269223714154134
+    "<12 m": 0.09803915990464067,
+    "12\u201325 m": 0.09600334875083064,
+    ">25 m": 0.13540109770692316
   },
   "progress_floor_mult": 0.3,
   "progress_logistic_k": 2.2,

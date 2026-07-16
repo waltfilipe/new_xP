@@ -1,8 +1,8 @@
 {
-  "version": "m4_od_8x6_12x8_threat_q10_progress_v1",
+  "version": "m4_od_8x6_12x8_threat_q10_progress_blend50_v1",
   "passes": 119654,
   "completed": 95128,
-  "threats": 9907,
+  "threats": 9878,
   "players": 580,
   "matches": 156
 }
