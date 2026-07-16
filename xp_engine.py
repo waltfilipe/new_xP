@@ -16,14 +16,14 @@ from sklearn.pipeline import Pipeline
 import passes_engine as pe
 import xp_study_engine as xse
 
-XP_DATA_CACHE_VERSION = 2
+XP_DATA_CACHE_VERSION = 3
 XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total",
     "xp_m4_per_pass",
     "xp_m4_threat_passes_p90",
     "xp_m4_threat_rate",
 )
-XP_MODEL_VERSION = "m4_od_8x6_12x8_threat_q10_v1"
+XP_MODEL_VERSION = "m4_od_8x6_12x8_threat_q10_progress_v1"
 THREAT_QUANTILE = 0.10
 XP_COL = "xp_m4"
 XP_EXPECTED_COL = "xp_expected"
@@ -82,9 +82,19 @@ def attach_od_cells(passes: pd.DataFrame, grid: xse.GridConfig = GRID) -> pd.Dat
     return out
 
 
+def _progress_ratio_array(df: pd.DataFrame) -> np.ndarray:
+    if "progress_ratio" in df.columns:
+        return df["progress_ratio"].to_numpy(dtype=float)
+    dist = np.maximum(df["pass_distance"].to_numpy(dtype=float), 0.5)
+    dx = df["x_end"].to_numpy(dtype=float) - df["x_start"].to_numpy(dtype=float)
+    return np.clip(dx / dist, -1.0, 1.0)
+
+
 def _build_design_matrix(df: pd.DataFrame, grid: xse.GridConfig = GRID) -> sparse.csr_matrix:
     dist = df["pass_distance"].to_numpy(dtype=float)
     dist_feats = np.column_stack([dist, dist ** 2, np.sqrt(dist)])
+    progress = _progress_ratio_array(df)
+    progress_feats = np.column_stack([progress, progress ** 2])
     n = len(df)
     o_idx = df["oy"].to_numpy(int) * grid.od_origin_cols + df["ox"].to_numpy(int)
     d_idx = df["dy"].to_numpy(int) * grid.od_dest_cols + df["dx"].to_numpy(int)
@@ -92,6 +102,7 @@ def _build_design_matrix(df: pd.DataFrame, grid: xse.GridConfig = GRID) -> spars
     n_d = _n_dest_cells()
     return sparse.hstack([
         sparse.csr_matrix(dist_feats),
+        sparse.csr_matrix(progress_feats),
         sparse.csr_matrix((np.ones(n), (np.arange(n), o_idx)), shape=(n, n_o)),
         sparse.csr_matrix((np.ones(n), (np.arange(n), d_idx)), shape=(n, n_d)),
     ])
@@ -115,7 +126,13 @@ def score_match_passes_m4(
         league=league,
     )
     scored = attach_od_cells(scored, grid)
-    scored[XP_COL] = scored[xse.XP_MODEL_COLUMNS[xse.XP_MODEL_HIER_OD]]
+    if "progress_ratio" not in scored.columns:
+        scored["progress_ratio"] = xse._progress_ratio_series(scored)
+    progress_mult = xse.progress_toward_goal_multiplier(scored["progress_ratio"].to_numpy(dtype=float))
+    scored["xp_progress_mult"] = progress_mult
+    scored[XP_COL] = (
+        scored[xse.XP_MODEL_COLUMNS[xse.XP_MODEL_HIER_OD]].to_numpy(dtype=float) * progress_mult
+    )
     return scored
 
 
@@ -186,6 +203,8 @@ def fit_and_save_artifacts(*, force: bool = False) -> dict:
         "threat_quantile": THREAT_QUANTILE,
         "residual_thresholds": thresholds,
         "residual_threshold_labels": {BAND_LABELS[k]: v for k, v in thresholds.items()},
+        "progress_floor_mult": xse.XP_PROGRESS_FLOOR_MULT,
+        "progress_logistic_k": xse.XP_PROGRESS_LOGISTIC_K,
         "league_passes": int(len(train)),
         "league_matches": int(train["event_id"].nunique()) if "event_id" in train.columns else 0,
     }
@@ -277,8 +296,17 @@ def load_season_passes(*, rebuild: bool = False) -> pd.DataFrame:
     if rebuild or not XP_PASSES_PARQUET.exists():
         return build_serie_b_season_passes(force_artifacts=rebuild)
     df = pd.read_parquet(XP_PASSES_PARQUET)
-    if THREAT_COL not in df.columns or XP_COL not in df.columns:
+    if (
+        THREAT_COL not in df.columns
+        or XP_COL not in df.columns
+        or "xp_progress_mult" not in df.columns
+    ):
         return build_serie_b_season_passes(force_artifacts=True)
+    if XP_META_PATH.exists():
+        with open(XP_META_PATH, encoding="utf-8") as fh:
+            meta = json.load(fh)
+        if str(meta.get("version", "")) != XP_MODEL_VERSION:
+            return build_serie_b_season_passes(force_artifacts=True)
     return df
 
 

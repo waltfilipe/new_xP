@@ -1,16 +1,18 @@
 {
-  "version": "m4_od_8x6_12x8_threat_q10_v1",
+  "version": "m4_od_8x6_12x8_threat_q10_progress_v1",
   "threat_quantile": 0.1,
   "residual_thresholds": {
-    "short": 0.1631027258330732,
-    "medium": 0.16221011985905223,
-    "long": 0.19400210412496843
+    "short": 0.09620388428557963,
+    "medium": 0.09367794014889504,
+    "long": 0.12269223714154134
   },
   "residual_threshold_labels": {
-    "<12 m": 0.1631027258330732,
-    "12\u201325 m": 0.16221011985905223,
-    ">25 m": 0.19400210412496843
+    "<12 m": 0.09620388428557963,
+    "12\u201325 m": 0.09367794014889504,
+    ">25 m": 0.12269223714154134
   },
+  "progress_floor_mult": 0.3,
+  "progress_logistic_k": 2.2,
   "league_passes": 212108,
   "league_matches": 330
 }
