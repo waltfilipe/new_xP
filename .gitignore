@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.streamlit/secrets.toml
+.venv/
+venv/
+.env
+data/sofascore/
+data/player_profiles_cache.json
+passbr*/
