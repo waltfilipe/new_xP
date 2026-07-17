@@ -19,8 +19,9 @@ CENTRAL_Y_MIN = 20.0
 CENTRAL_Y_MAX = 60.0
 LATERAL_INNER_SHARE = 0.30
 LINE_BREAK_FORWARD_ANGLE_DEG = 40.0
-LINE_BREAK_DIST_MIN_M = 10.0
+LINE_BREAK_DIST_MIN_M = 15.0
 LINE_BREAK_DIST_MAX_M = 20.0
+LINE_BREAK_MIN_START_X = FIRST_THIRD_X
 PENALTY_X_MIN = pe.PENALTY_BOX_X_MIN
 PENALTY_Y_MIN = pe.PENALTY_BOX_Y_MIN
 PENALTY_Y_MAX = pe.PENALTY_BOX_Y_MAX
@@ -162,6 +163,7 @@ def compute_special_pass_masks(scored: pd.DataFrame) -> dict[str, np.ndarray]:
         ),
         "line_break": (
             _line_break_origin_corridor(y_start)
+            & (x_start > LINE_BREAK_MIN_START_X)
             & (dist >= LINE_BREAK_DIST_MIN_M)
             & (dist <= LINE_BREAK_DIST_MAX_M)
             & (x_end > x_start)
