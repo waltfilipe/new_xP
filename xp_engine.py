@@ -16,12 +16,18 @@ from sklearn.pipeline import Pipeline
 import passes_engine as pe
 import xp_study_engine as xse
 
-XP_DATA_CACHE_VERSION = 5
+XP_DATA_CACHE_VERSION = 6
 XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total",
     "xp_m4_per_pass",
     "xp_m4_threat_passes_p90",
     "xp_m4_threat_rate",
+    "xp_m4_total_short",
+    "xp_m4_threat_short_p90",
+    "xp_m4_total_medium",
+    "xp_m4_threat_medium_p90",
+    "xp_m4_total_long",
+    "xp_m4_threat_long_p90",
 )
 XP_MODEL_VERSION = "m4_od_12x8_b4_a2_pr0_blend40_pl_v1"
 THREAT_QUANTILE = 0.10
@@ -412,6 +418,7 @@ def compute_player_xp_metrics(grp: pd.DataFrame) -> dict[str, float | int]:
         sub = scored[scored["distance_band"] == band]
         out[f"xp_m4_threat_{band}"] = int(sub[THREAT_COL].sum()) if THREAT_COL in sub.columns and len(sub) else 0
         out[f"xp_m4_mean_{band}"] = float(sub[XP_COL].mean()) if len(sub) else 0.0
+        out[f"xp_m4_total_{band}"] = float(sub[XP_COL].sum()) if len(sub) else 0.0
     return out
 
 
@@ -442,9 +449,15 @@ def build_xp_analytics(
         minutes = mins.get("minutes")
         threat_total = int(metrics.get("xp_m4_threat_passes", 0))
         if minutes and float(minutes) > 0:
-            metrics["xp_m4_threat_passes_p90"] = float(threat_total) * 90.0 / float(minutes)
+            mins_f = float(minutes)
+            metrics["xp_m4_threat_passes_p90"] = float(threat_total) * 90.0 / mins_f
+            for band in BANDS:
+                band_threats = int(metrics.get(f"xp_m4_threat_{band}", 0))
+                metrics[f"xp_m4_threat_{band}_p90"] = float(band_threats) * 90.0 / mins_f
         else:
             metrics["xp_m4_threat_passes_p90"] = 0.0
+            for band in BANDS:
+                metrics[f"xp_m4_threat_{band}_p90"] = 0.0
         players.append({
             "player_id": pid,
             "player_name": player["name"],

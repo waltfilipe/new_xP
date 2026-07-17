@@ -1056,6 +1056,133 @@ def _progression_compare_stats_html(
     return "".join(rows)
 
 
+def _xp_compare_stats_html(
+    primary_xp: dict,
+    secondary_xp: dict,
+    *,
+    primary_name: str,
+    secondary_name: str,
+    primary_group: str | None = None,
+    secondary_group: str | None = None,
+) -> str:
+    primary_name = html.escape(str(primary_name or "Player A"))
+    secondary_name = html.escape(str(secondary_name or "Player B"))
+    rows = [
+        '<div class="player-card">',
+        '<div class="cmp-row cmp-row-head">',
+        "<span>Métrica</span>",
+        f"<span>{primary_name}</span>",
+        f"<span>{secondary_name}</span>",
+        "</div>",
+    ]
+    for section_title, keys in XP_COMPARE_SECTIONS:
+        rows.extend([
+            '<div class="cmp-row cmp-row-section">',
+            f'<span class="cmp-cell-label cmp-section-label">{html.escape(section_title)}</span>',
+            "<span></span>",
+            "<span></span>",
+            "</div>",
+        ])
+        for key in keys:
+            label = html.escape(_xp_metric_label(key))
+            p_val = html.escape(_xp_stat_display(primary_xp, key))
+            s_val = html.escape(_xp_stat_display(secondary_xp, key))
+            p_num = _xp_stat_numeric_value(primary_xp, key)
+            s_num = _xp_stat_numeric_value(secondary_xp, key)
+            s_delta = _cmp_stat_pct_delta_html(s_num, p_num)
+            p_rank = ""
+            s_rank = ""
+            p_rank_n = primary_xp.get(f"{key}_rank_in_group")
+            s_rank_n = secondary_xp.get(f"{key}_rank_in_group")
+            if p_rank_n:
+                p_rank = html.escape(_xp_rank_in_group_label(int(p_rank_n), primary_group))
+            if s_rank_n:
+                s_rank = html.escape(_xp_rank_in_group_label(int(s_rank_n), secondary_group))
+            rows.extend([
+                '<div class="cmp-row">',
+                f'<span class="cmp-cell-label">{label}</span>',
+                (
+                    f'<span><span class="cmp-value-wrap">'
+                    f'<span class="cmp-cell-value">{p_val}</span></span>'
+                    f'{"<span class=\"cmp-rank-note\">" + p_rank + "</span>" if p_rank else ""}</span>'
+                ),
+                (
+                    f'<span><span class="cmp-value-wrap">'
+                    f'<span class="cmp-cell-value">{s_val}</span>{s_delta}</span>'
+                    f'{"<span class=\"cmp-rank-note\">" + s_rank + "</span>" if s_rank else ""}</span>'
+                ),
+                "</div>",
+            ])
+    rows.append("</div>")
+    return "".join(rows)
+
+
+def _render_xp_comparison_panel(
+    primary: dict,
+    *,
+    all_players: list[dict],
+    progression_by_id: dict[str, dict],
+    xp_by_id: dict[str, dict],
+) -> None:
+    primary_id = str(primary.get("player_id"))
+    primary_xp = xp_by_id.get(primary_id)
+    if not primary_xp:
+        st.info("Métricas xP indisponíveis para comparação.")
+        return
+
+    comparison_codes, comparison_groups = _comparison_position_filter_for_player(primary)
+    pool_label = _comparison_pool_label(primary)
+    options = _player_analysis_options(
+        all_players,
+        progression_by_id,
+        position_codes=comparison_codes,
+        position_groups=comparison_groups,
+        xp_by_id=xp_by_id,
+        exclude_player_id=primary_id,
+    )
+    if not options:
+        st.info(f"Nenhum outro jogador disponível no grupo {pool_label} para comparação.")
+        return
+
+    st.markdown("### Comparação xP")
+    st.caption(f"Comparando dentro do grupo: {pool_label}.")
+
+    labels = [o[3] for o in options]
+    id_by_label = {o[3]: o[0] for o in options}
+    current_label = st.session_state.get(PLAYER_ANALYSIS_COMPARE_KEY)
+    if current_label and current_label not in labels:
+        st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
+
+    compare_label = st.selectbox(
+        "Comparar com",
+        options=labels,
+        key=PLAYER_ANALYSIS_COMPARE_KEY,
+        placeholder="Selecione outro jogador",
+    )
+    if not compare_label:
+        st.info("Selecione um segundo jogador para comparar as métricas xP.")
+        return
+
+    compare_id = id_by_label[compare_label]
+    compare_xp = xp_by_id.get(compare_id)
+    if not compare_xp:
+        st.warning("Métricas xP indisponíveis para o jogador selecionado.")
+        return
+
+    compare_player = progression_by_id.get(compare_id, {})
+    st.html(
+        _xp_compare_stats_html(
+            primary_xp,
+            compare_xp,
+            primary_name=str(primary.get("player_name", "—")),
+            secondary_name=str(compare_player.get("player_name", compare_xp.get("player_name", "—"))),
+            primary_group=str(primary.get("position_group") or ""),
+            secondary_group=str(compare_player.get("position_group") or compare_xp.get("position_group") or ""),
+        ),
+        width="stretch",
+    )
+
+
 def _render_player_comparison_panel(
     primary: dict,
     *,
@@ -1544,6 +1671,18 @@ st.markdown(
         letter-spacing: 0.05em;
         padding-bottom: 0.2rem;
         border-bottom: 1px solid #2a3550;
+    }
+    .cmp-row-section {
+        border-bottom: none;
+        padding-top: 0.55rem;
+        padding-bottom: 0.1rem;
+    }
+    .cmp-row-section .cmp-section-label {
+        color: #93c5fd;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
     }
     .cmp-cell-label { color: #cbd5e1; font-size: 0.84rem; }
     .cmp-rank-note {
@@ -4347,8 +4486,11 @@ def _xp_metric_ranks_dict(xp_profile: dict | None) -> dict:
 
 
 XP_PASSING_SECTION_SPECS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    ("xp_pass_volume", "Pass xP", "", ("xp_m4_total", "xp_m4_per_pass")),
-    ("xp_threat", "xP Threat", "", ("xp_m4_threat_passes_p90", "xp_m4_threat_rate")),
+    ("xp_volume", "Volume", "", ("xp_m4_total", "xp_m4_threat_passes_p90")),
+    ("xp_effectiveness", "Effectiveness", "", ("xp_m4_per_pass", "xp_m4_threat_rate")),
+    ("xp_short", "Short", "", ("xp_m4_total_short", "xp_m4_threat_short_p90")),
+    ("xp_medium", "Medium", "", ("xp_m4_total_medium", "xp_m4_threat_medium_p90")),
+    ("xp_long", "Long", "", ("xp_m4_total_long", "xp_m4_threat_long_p90")),
 )
 
 XP_METRIC_LABELS: dict[str, str] = {
@@ -4356,7 +4498,17 @@ XP_METRIC_LABELS: dict[str, str] = {
     "xp_m4_per_pass": "xP/Passe",
     "xp_m4_threat_passes_p90": "xP Threat Passes (Per game)",
     "xp_m4_threat_rate": "% Threat Passes",
+    "xp_m4_total_short": "xP Total",
+    "xp_m4_threat_short_p90": "xP Threat Passes (Per game)",
+    "xp_m4_total_medium": "xP Total",
+    "xp_m4_threat_medium_p90": "xP Threat Passes (Per game)",
+    "xp_m4_total_long": "xP Total",
+    "xp_m4_threat_long_p90": "xP Threat Passes (Per game)",
 }
+
+XP_COMPARE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = tuple(
+    (title, keys) for _key, title, _subtitle, keys in XP_PASSING_SECTION_SPECS
+)
 
 
 def _xp_metric_label(key: str) -> str:
@@ -4364,15 +4516,30 @@ def _xp_metric_label(key: str) -> str:
 
 
 def _xp_stat_display(profile: dict, key: str) -> str:
-    if key == "xp_m4_total":
+    if key.startswith("xp_m4_total"):
         return f"{float(profile.get(key, 0)):.1f}"
     if key == "xp_m4_per_pass":
         return f"{float(profile.get(key, 0)):.3f}"
-    if key == "xp_m4_threat_passes_p90":
+    if key.endswith("_p90"):
         return f"{float(profile.get(key, 0)):.2f}"
     if key == "xp_m4_threat_rate":
         return f"{100 * float(profile.get(key, 0)):.1f}%"
     return "—"
+
+
+def _xp_stat_numeric_value(profile: dict, key: str) -> float | None:
+    val = profile.get(key)
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _xp_rank_in_group_label(rank: int, position_group: str | None) -> str:
+    group = position_group_label(str(position_group or "—"))
+    return f"#{rank} em {group}"
 
 
 def _xp_section_metric_avg_rank_bar_html(xp_profile: dict, keys: tuple[str, ...]) -> str:
@@ -5831,7 +5998,15 @@ def render_player_analysis_section(
         confidence_passes=RATING_CONFIDENCE_PASSES,
     )
 
-    st.info("Similaridade e comparação em breve — funcionalidade em desenvolvimento.")
+    if xp_by_id:
+        _render_xp_comparison_panel(
+            player,
+            all_players=all_players,
+            progression_by_id=progression_by_id,
+            xp_by_id=xp_by_id,
+        )
+    else:
+        st.info("Métricas xP indisponíveis para comparação.")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
