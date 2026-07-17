@@ -17,9 +17,7 @@ FINAL_X_MIN = FIELD_X * (1.0 - FINAL_FIELD_SHARE)
 FIRST_THIRD_X = FIELD_X / 3.0
 CENTRAL_Y_MIN = 20.0
 CENTRAL_Y_MAX = 60.0
-LATERAL_INNER_SHARE = 0.30
-LINE_BREAK_DIST_MIN_M = 10.0
-LINE_BREAK_DIST_MAX_M = 20.0
+LINE_BREAK_FORWARD_ANGLE_DEG = 40.0
 PENALTY_X_MIN = pe.PENALTY_BOX_X_MIN
 PENALTY_Y_MIN = pe.PENALTY_BOX_Y_MIN
 PENALTY_Y_MAX = pe.PENALTY_BOX_Y_MAX
@@ -65,24 +63,30 @@ def _zone_x(x: np.ndarray) -> np.ndarray:
     return out
 
 
-def _corridor_index(y: np.ndarray) -> np.ndarray:
-    out = np.full(len(y), "central", dtype=object)
-    out[y < CENTRAL_Y_MIN] = "left"
-    out[y > CENTRAL_Y_MAX] = "right"
-    return out
+def _is_left_corridor(y: np.ndarray) -> np.ndarray:
+    return y < CENTRAL_Y_MIN
+
+
+def _is_right_corridor(y: np.ndarray) -> np.ndarray:
+    return y > CENTRAL_Y_MAX
 
 
 def _is_lateral_corridor(y: np.ndarray) -> np.ndarray:
-    return (y < CENTRAL_Y_MIN) | (y > CENTRAL_Y_MAX)
+    return _is_left_corridor(y) | _is_right_corridor(y)
 
 
-def _line_break_origin_corridor(y: np.ndarray) -> np.ndarray:
-    """Central corridor plus the inner 30% of each lateral band (adjacent to center)."""
-    left_inner = (y < CENTRAL_Y_MIN) & (y >= CENTRAL_Y_MIN * (1.0 - LATERAL_INNER_SHARE))
-    right_inner = (y > CENTRAL_Y_MAX) & (
-        y <= CENTRAL_Y_MAX + (FIELD_Y - CENTRAL_Y_MAX) * LATERAL_INNER_SHARE
-    )
-    return (y >= CENTRAL_Y_MIN) & (y <= CENTRAL_Y_MAX) | left_inner | right_inner
+def _is_forward_angle(dx: np.ndarray, dy: np.ndarray, *, max_angle_deg: float) -> np.ndarray:
+    """True when the pass aims forward (+x) within ±max_angle_deg of the goal direction."""
+    forward = dx > 0.0
+    angle_deg = np.degrees(np.arctan2(dy, np.where(forward, dx, 1.0)))
+    return forward & (np.abs(angle_deg) <= max_angle_deg)
+
+
+def _is_left_right_inversion(y_start: np.ndarray, y_end: np.ndarray) -> np.ndarray:
+    """Long pass that switches directly between left and right lateral corridors."""
+    left_to_right = _is_left_corridor(y_start) & _is_right_corridor(y_end)
+    right_to_left = _is_right_corridor(y_start) & _is_left_corridor(y_end)
+    return left_to_right | right_to_left
 
 
 def _in_penalty_box(x: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -127,13 +131,13 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
     x_end = scored["x_end"].to_numpy(dtype=float)
     y_end = scored["y_end"].to_numpy(dtype=float)
     dist = scored["pass_distance"].to_numpy(dtype=float)
+    dx = x_end - x_start
+    dy = y_end - y_start
 
     start_zone = _zone_x(x_start)
     xp_total = float(xp.sum())
 
     long_pass = _is_long_pass(scored, dist)
-    start_corridor = _corridor_index(y_start)
-    end_corridor = _corridor_index(y_end)
     lateral_start = _is_lateral_corridor(y_start)
     lateral_end = _is_lateral_corridor(y_end)
 
@@ -143,13 +147,8 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
         & (x_end >= FINAL_X_MIN)
         & long_pass
     )
-    line_break = (
-        _line_break_origin_corridor(y_start)
-        & (dist >= LINE_BREAK_DIST_MIN_M)
-        & (dist <= LINE_BREAK_DIST_MAX_M)
-        & (x_end > x_start)
-    )
-    inversion = long_pass & (start_corridor != end_corridor)
+    line_break = _is_forward_angle(dx, dy, max_angle_deg=LINE_BREAK_FORWARD_ANGLE_DEG)
+    inversion = long_pass & _is_left_right_inversion(y_start, y_end)
     cross = lateral_start & (x_start >= FINAL_X_MIN) & _in_penalty_box(x_end, y_end)
     in_box = _in_penalty_box(x_end, y_end)
 
