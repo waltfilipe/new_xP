@@ -5772,6 +5772,8 @@ def build_xp_per_pass_total_scatter_figure(
     position_label: str,
     highlight_player_id: str | None = None,
 ):
+    import math
+
     import plotly.graph_objects as go
 
     points: list[dict[str, object]] = []
@@ -5948,7 +5950,7 @@ def _render_xp_scatter_panel(
 
     position_label = _selected_position_blocks_label(STATS_SCATTER_POSITION_BLOCKS_KEY)
 
-    fig = draw_xp_per_pass_total_scatter(
+    fig = build_xp_per_pass_total_scatter_figure(
         pool,
         per_pass_key=per_pass_key,
         total_key=total_key,
@@ -5956,7 +5958,11 @@ def _render_xp_scatter_panel(
         position_label=position_label,
         highlight_player_id=highlight_player_id,
     )
-    st.pyplot(fig, clear_figure=True, use_container_width=True)
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displayModeBar": False, "responsive": True},
+    )
     min_passes_hint = ", ".join(
         f"{position_group_label(group)}: ≥{threshold:.0f}"
         for group, threshold in sorted(thresholds.items())
