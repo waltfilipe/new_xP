@@ -80,6 +80,23 @@ def _load_xp_study_engine():
     sys.modules["xp_study_engine"] = module
     return module
 
+
+def _load_xp_stats_engine():
+    """Load local xp_stats_engine.py explicitly (avoids path/shadowing on Streamlit Cloud)."""
+    import importlib.util
+
+    module_path = _APP_ROOT / "xp_stats_engine.py"
+    if not module_path.is_file():
+        raise ImportError(f"File not found: {module_path}")
+    spec = importlib.util.spec_from_file_location("passes_xt_xp_stats_engine", module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules["passes_xt_xp_stats_engine"] = module
+    sys.modules["xp_stats_engine"] = module
+    return module
+
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -121,6 +138,7 @@ from progression_maps import (
 )
 xpe = _load_xp_study_engine()
 xe = _load_xp_engine()
+xstats = _load_xp_stats_engine()
 from xp_study_maps import draw_top_xp_passes_map, draw_xp_destination_surface, draw_xp_threat_passes_season_map
 
 XP_DATA_CACHE_VERSION = xe.XP_DATA_CACHE_VERSION
@@ -2172,6 +2190,26 @@ st.markdown(
     }
     section[data-testid="stSidebar"] { display: none; }
     .pa-shell { max-width: 1380px; margin: 0.15rem auto 1.25rem auto; }
+    .stats-shell { max-width: 920px; margin: 0.15rem auto 1.25rem auto; }
+    .stats-panel {
+        background: #0f172a;
+        border: 1px solid #1e293b;
+        border-radius: 12px;
+        padding: 0.35rem 0.85rem 0.65rem 0.85rem;
+    }
+    .stats-panel .stat-section-row { margin-top: 0.65rem; }
+    .stats-panel .stat-section-row:first-child { margin-top: 0.15rem; }
+    .stats-player-head {
+        margin: 0 0 0.75rem 0;
+        color: #f8fafc;
+        font-size: 1.35rem;
+        font-weight: 700;
+    }
+    .stats-player-meta {
+        margin: -0.35rem 0 0.85rem 0;
+        color: #94a3b8;
+        font-size: 0.88rem;
+    }
     .pa-slicer-panel {
         margin-top: -0.35rem;
         margin-bottom: 0.9rem;
@@ -5560,6 +5598,79 @@ def _maps_distance_label(distance_band: str) -> str:
     return xe.BAND_LABELS.get(distance_band, distance_band)
 
 
+def _xp_stats_metric_ranks_dict(profile: dict, keys: tuple[str, ...]) -> dict:
+    ranks: dict[str, dict[str, int]] = {}
+    for key in keys:
+        rank = profile.get(f"{key}_rank_in_group")
+        total = profile.get(f"{key}_rank_pool_in_group")
+        if rank and total:
+            ranks[key] = {"rank": int(rank), "total": int(total)}
+    return ranks
+
+
+def _build_stats_panel_html(profile: dict) -> str:
+    parts: list[str] = ['<div class="stats-panel">']
+    for section_title, keys in xstats.XP_STATS_SECTIONS:
+        parts.append(_section_header_html(section_title, "", profile))
+        metric_ranks = _xp_stats_metric_ranks_dict(profile, keys)
+        for key in keys:
+            parts.append(
+                _metric_line_html(
+                    xstats.stats_metric_label(key),
+                    key,
+                    xstats.format_stats_value(key, profile.get(key)),
+                    metric_ranks,
+                    show_rank=True,
+                    label_fn=xstats.stats_metric_label,
+                    tooltip_fn=lambda _k: "",
+                    rank_in_group_fn=_xp_rank_in_group_label,
+                )
+            )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def render_stats_section(
+    all_players: list[dict],
+    progression_by_id: dict[str, dict],
+    *,
+    xp_by_id: dict[str, dict] | None = None,
+) -> None:
+    st.subheader("Stats — xP")
+
+    if not all_players:
+        st.info("No players available.")
+        return
+
+    players_by_id = {str(p["player_id"]): p for p in all_players}
+    player_id = _render_shared_player_slicers(
+        all_players,
+        progression_by_id,
+        players_by_id,
+        xp_by_id=xp_by_id,
+        key_prefix="stats",
+    )
+    if not player_id:
+        return
+
+    profile = (xp_by_id or {}).get(str(player_id))
+    if not profile:
+        st.warning("Métricas xP indisponíveis para este jogador.")
+        return
+
+    group_label = position_group_label(str(profile.get("position_group") or "—"))
+    st.markdown('<div class="stats-shell">', unsafe_allow_html=True)
+    st.markdown(
+        f'<p class="stats-player-head">{html.escape(str(profile.get("player_name", "—")))}</p>'
+        f'<p class="stats-player-meta">{html.escape(str(profile.get("team", "—")))} · '
+        f'{html.escape(str(profile.get("position", "—")))} · {html.escape(group_label)} · '
+        f"Barras = posição no grupo</p>",
+        unsafe_allow_html=True,
+    )
+    st.html(_build_stats_panel_html(profile), width="stretch")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 def render_maps_section(
     all_players: list[dict],
     progression_by_id: dict[str, dict],
@@ -6785,7 +6896,9 @@ def main() -> None:
             xp_passes_by_player = load_xp_passes()
         xp_by_id = {str(p["player_id"]): p for p in xp_players}
 
-    tab_pres, tab_analysis, tab_maps = st.tabs(["Overview", "Player Analysis", "Maps"])
+    tab_pres, tab_stats, tab_analysis, tab_maps = st.tabs(
+        ["Overview", "Stats", "Player Analysis", "Maps"]
+    )
     with tab_pres:
         render_presentation_tab(
             all_players,
@@ -6794,6 +6907,12 @@ def main() -> None:
             pool_by_position,
             rated=rated,
             xp_players=xp_players,
+        )
+    with tab_stats:
+        render_stats_section(
+            all_players,
+            progression_by_id,
+            xp_by_id=xp_by_id,
         )
     with tab_analysis:
         render_player_analysis_section(

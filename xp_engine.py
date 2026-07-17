@@ -16,7 +16,7 @@ from sklearn.pipeline import Pipeline
 import passes_engine as pe
 import xp_study_engine as xse
 
-XP_DATA_CACHE_VERSION = 6
+XP_DATA_CACHE_VERSION = 7
 XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total",
     "xp_m4_per_pass",
@@ -425,6 +425,8 @@ def compute_player_xp_metrics(grp: pd.DataFrame) -> dict[str, float | int]:
 def build_xp_analytics(
     cache_version: int = XP_DATA_CACHE_VERSION,
 ) -> tuple[list[dict], list[dict]]:
+    import xp_stats_engine as xstats
+
     _ = cache_version
     season = load_season_passes()
     frame = pe._load_season_pass_frame()
@@ -443,21 +445,11 @@ def build_xp_analytics(
         if grp.empty:
             continue
         mins = minutes_info.get(pid, {})
-        metrics = compute_player_xp_metrics(grp)
+        metrics = xstats.compute_extended_xp_stats(grp)
         if not metrics:
             continue
         minutes = mins.get("minutes")
-        threat_total = int(metrics.get("xp_m4_threat_passes", 0))
-        if minutes and float(minutes) > 0:
-            mins_f = float(minutes)
-            metrics["xp_m4_threat_passes_p90"] = float(threat_total) * 90.0 / mins_f
-            for band in BANDS:
-                band_threats = int(metrics.get(f"xp_m4_threat_{band}", 0))
-                metrics[f"xp_m4_threat_{band}_p90"] = float(band_threats) * 90.0 / mins_f
-        else:
-            metrics["xp_m4_threat_passes_p90"] = 0.0
-            for band in BANDS:
-                metrics[f"xp_m4_threat_{band}_p90"] = 0.0
+        xstats.apply_per90_metrics(metrics, minutes)
         players.append({
             "player_id": pid,
             "player_name": player["name"],
@@ -473,6 +465,8 @@ def build_xp_analytics(
     players.sort(key=lambda p: float(p.get("xp_m4_total", 0.0)), reverse=True)
     for i, p in enumerate(players, start=1):
         p["xp_m4_rank"] = i
+    xstats.attach_composite_indices(players)
+    xstats.attach_all_stats_ranks(players)
     attach_xp_metric_ranks(players)
     return registry, players
 
