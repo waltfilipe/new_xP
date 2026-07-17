@@ -26,6 +26,14 @@ DISTANCE_MEDIUM_MAX_M = pe.DISTANCE_MEDIUM_MAX_M
 BANDS = xse.DISTANCE_BAND_ORDER
 DISTANCE_INDEX_MIN_PASS_PERCENTILE = 20
 
+DISTANCE_INDEX_GRADES: tuple[tuple[str, float], ...] = (
+    ("Good", 0.20),
+    ("Above Average", 0.40),
+    ("Average", 0.60),
+    ("Under Average", 0.80),
+    ("Poor", 1.00),
+)
+
 
 def _zone_x(x: np.ndarray) -> np.ndarray:
     out = np.full(len(x), "mid", dtype=object)
@@ -419,6 +427,35 @@ def attach_distance_indices(players: list[dict]) -> None:
                     row[f"xp_dist_index_{band}"] = None
                     row.pop(f"xp_dist_index_{band}_rank_in_group", None)
                     row.pop(f"xp_dist_index_{band}_rank_pool_in_group", None)
+
+        for row in rows:
+            band_vals = [
+                float(row[f"xp_dist_index_{band}"])
+                for band in BANDS
+                if row.get(f"xp_dist_index_{band}_eligible")
+                and row.get(f"xp_dist_index_{band}") is not None
+            ]
+            row["xp_dist_index_mean"] = float(np.mean(band_vals)) if band_vals else None
+
+
+def distance_index_grade(rank: int | None, total: int | None) -> str | None:
+    """Map within-position rank (1 = best) to a qualitative distance-index label."""
+    if not rank or not total or rank <= 0 or total <= 0:
+        return None
+    pct = float(rank) / float(total)
+    for label, cutoff in DISTANCE_INDEX_GRADES:
+        if pct <= cutoff:
+            return label
+    return DISTANCE_INDEX_GRADES[-1][0]
+
+
+def distance_index_grade_for_profile(profile: dict, band: str) -> str | None:
+    if not profile.get(f"xp_dist_index_{band}_eligible", True):
+        return None
+    return distance_index_grade(
+        profile.get(f"xp_dist_index_{band}_rank_in_group"),
+        profile.get(f"xp_dist_index_{band}_rank_pool_in_group"),
+    )
 
 
 def attach_all_stats_ranks(players: list[dict]) -> None:

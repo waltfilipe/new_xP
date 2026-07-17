@@ -2197,6 +2197,31 @@ st.markdown(
         border-radius: 12px;
         padding: 0.35rem 0.85rem 0.65rem 0.85rem;
     }
+    .stats-panel .grade-accordion {
+        margin-bottom: 0.35rem;
+    }
+    .stats-panel .grade-accordion:last-child {
+        margin-bottom: 0;
+    }
+    .stats-panel .grade-accordion summary {
+        padding: 0.55rem 0.35rem;
+    }
+    .stats-panel .grade-card-title {
+        font-size: 0.82rem;
+    }
+    .dist-index-grade-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 108px;
+        padding: 4px 11px;
+        border-radius: 7px;
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        border: 1px solid rgba(255,255,255,0.18);
+        white-space: nowrap;
+    }
     .stats-panel .stat-section-row { margin-top: 0.65rem; }
     .stats-panel .stat-section-row:first-child { margin-top: 0.15rem; }
     .stats-player-head {
@@ -3360,8 +3385,9 @@ def _player_analysis_options(
     position_groups: frozenset[str] = frozenset(),
     xp_by_id: dict[str, dict] | None = None,
     exclude_player_id: str | None = None,
+    sort_by: str = "xp_total",
 ) -> list[tuple[str, str, str, str]]:
-    """Player slicer options ranked by season xP within selected position blocks."""
+    """Player slicer options ranked within selected position blocks."""
     ranked_rows: list[tuple[str, str, str, float]] = []
     for player in players:
         pid = str(player["player_id"])
@@ -3375,24 +3401,29 @@ def _player_analysis_options(
         ):
             continue
         xp_profile = (xp_by_id or {}).get(pid, {})
-        xp_total = float(xp_profile.get("xp_m4_total", 0.0))
+        if sort_by == "dist_index_mean":
+            sort_val = xp_profile.get("xp_dist_index_mean")
+            sort_key = float(sort_val) if sort_val is not None else float("-inf")
+        else:
+            sort_key = float(xp_profile.get("xp_m4_total", 0.0))
         ranked_rows.append((
             pid,
             str(player.get("player_name", "—")),
             str(player.get("team", "—")),
-            xp_total,
+            sort_key,
         ))
 
     ranked_rows.sort(key=lambda row: (-row[3], _norm(row[1])))
-    return [
-        (
-            pid,
-            name,
-            team,
-            f"#{idx} {name} ({team}) · xP {xp_total:.1f}",
-        )
-        for idx, (pid, name, team, xp_total) in enumerate(ranked_rows, start=1)
-    ]
+    options: list[tuple[str, str, str, str]] = []
+    for idx, (pid, name, team, sort_key) in enumerate(ranked_rows, start=1):
+        xp_profile = (xp_by_id or {}).get(pid, {})
+        if sort_by == "dist_index_mean":
+            mean_val = xp_profile.get("xp_dist_index_mean")
+            suffix = f"· Dist Index {float(mean_val):.2f}" if mean_val is not None else "· Dist Index —"
+        else:
+            suffix = f"· xP {sort_key:.1f}"
+        options.append((pid, name, team, f"#{idx} {name} ({team}) {suffix}"))
+    return options
 
 
 def _render_shared_player_slicers(
@@ -3402,6 +3433,7 @@ def _render_shared_player_slicers(
     *,
     xp_by_id: dict[str, dict] | None = None,
     key_prefix: str = "pa",
+    sort_by: str = "xp_total",
 ) -> str | None:
     """Position block slicer + player selectbox. Returns selected player_id or None."""
     _sync_player_analysis_selection(players_by_id, {})
@@ -3425,6 +3457,7 @@ def _render_shared_player_slicers(
                     position_codes=position_codes,
                     position_groups=position_groups,
                     xp_by_id=xp_by_id,
+                    sort_by=sort_by,
                 )
                 if not options:
                     st.info("Nenhum jogador disponível para os filtros selecionados.")
@@ -5601,7 +5634,7 @@ def _maps_distance_label(distance_band: str) -> str:
 def _xp_stats_metric_ranks_dict(profile: dict, keys: tuple[str, ...]) -> dict:
     ranks: dict[str, dict[str, int]] = {}
     for key in keys:
-        if key.startswith("xp_dist_index_") and not profile.get(f"{key}_eligible", True):
+        if key.startswith("xp_dist_index_"):
             continue
         rank = profile.get(f"{key}_rank_in_group")
         total = profile.get(f"{key}_rank_pool_in_group")
@@ -5610,24 +5643,96 @@ def _xp_stats_metric_ranks_dict(profile: dict, keys: tuple[str, ...]) -> dict:
     return ranks
 
 
+def _distance_index_grade_score(grade: str | None) -> float | None:
+    if not grade:
+        return None
+    mapping = {
+        "Good": 9.0,
+        "Above Average": 7.5,
+        "Average": 6.0,
+        "Under Average": 4.5,
+        "Poor": 3.0,
+    }
+    return mapping.get(grade)
+
+
+def _distance_index_grade_pill_html(profile: dict, band: str) -> str:
+    if not profile.get(f"xp_dist_index_{band}_eligible", True):
+        return '<span class="dist-index-grade-pill" style="background:#334155;color:#f8fafc">— (&lt; P20)</span>'
+    grade = xstats.distance_index_grade_for_profile(profile, band)
+    if not grade:
+        return '<span class="dist-index-grade-pill" style="background:#334155;color:#f8fafc">—</span>'
+    score = _distance_index_grade_score(grade)
+    bg = score_display_color(score) if score is not None else "#334155"
+    txt = _badge_text_color(bg)
+    return (
+        f'<span class="dist-index-grade-pill" style="background:{bg};color:{txt}">'
+        f"{html.escape(grade)}</span>"
+    )
+
+
+def _stats_metric_line_html(profile: dict, key: str, metric_ranks: dict) -> str:
+    if key.startswith("xp_dist_index_"):
+        band = key.removeprefix("xp_dist_index_")
+        value_html = _distance_index_grade_pill_html(profile, band)
+        label_html = html.escape(xstats.stats_metric_label(key))
+        return (
+            '<div class="metric-line">'
+            f"<span>{label_html}</span>"
+            f'<span style="text-align:right">{value_html}</span>'
+            "</div>"
+        )
+    return _metric_line_html(
+        xstats.stats_metric_label(key),
+        key,
+        xstats.format_stats_value(key, profile.get(key)),
+        metric_ranks,
+        show_rank=True,
+        label_fn=xstats.stats_metric_label,
+        tooltip_fn=lambda _k: "",
+        rank_in_group_fn=_xp_rank_in_group_label,
+    )
+
+
+def _stats_section_summary_html(profile: dict, section_title: str, keys: tuple[str, ...]) -> str:
+    dist_keys = [key for key in keys if key.startswith("xp_dist_index_")]
+    badge_html = ""
+    if len(dist_keys) == 1:
+        band = dist_keys[0].removeprefix("xp_dist_index_")
+        badge_html = _distance_index_grade_pill_html(profile, band)
+    title_row = (
+        f'<div class="grade-card-title-row">'
+        f'<div class="grade-card-title">{html.escape(section_title)}</div>'
+        f"{badge_html}"
+        f"</div>"
+    )
+    return (
+        f'<div class="grade-summary-main">'
+        f'<div class="grade-summary-top">'
+        f"{title_row}"
+        f"</div>"
+        f"</div>"
+    )
+
+
+def _stats_section_accordion_html(profile: dict, section_title: str, keys: tuple[str, ...]) -> str:
+    metric_ranks = _xp_stats_metric_ranks_dict(profile, keys)
+    lines = "".join(_stats_metric_line_html(profile, key, metric_ranks) for key in keys)
+    return (
+        '<details class="grade-accordion" name="stats-sections">'
+        "<summary>"
+        '<i class="fa-solid fa-chevron-right grade-arrow" aria-hidden="true"></i>'
+        f"{_stats_section_summary_html(profile, section_title, keys)}"
+        "</summary>"
+        f'<div class="grade-accordion-body">{lines}</div>'
+        "</details>"
+    )
+
+
 def _build_stats_panel_html(profile: dict) -> str:
     parts: list[str] = ['<div class="stats-panel">']
     for section_title, keys in xstats.XP_STATS_SECTIONS:
-        parts.append(_section_header_html(section_title, "", profile))
-        metric_ranks = _xp_stats_metric_ranks_dict(profile, keys)
-        for key in keys:
-            parts.append(
-                _metric_line_html(
-                    xstats.stats_metric_label(key),
-                    key,
-                    xstats.format_stats_value(key, profile.get(key)),
-                    metric_ranks,
-                    show_rank=True,
-                    label_fn=xstats.stats_metric_label,
-                    tooltip_fn=lambda _k: "",
-                    rank_in_group_fn=_xp_rank_in_group_label,
-                )
-            )
+        parts.append(_stats_section_accordion_html(profile, section_title, keys))
     parts.append("</div>")
     return "".join(parts)
 
@@ -5651,6 +5756,7 @@ def render_stats_section(
         players_by_id,
         xp_by_id=xp_by_id,
         key_prefix="stats",
+        sort_by="dist_index_mean",
     )
     if not player_id:
         return
@@ -5669,7 +5775,8 @@ def render_stats_section(
         f"Barras = posição no grupo · Curto &lt;{xstats.DISTANCE_SHORT_MAX_M:.0f} m · "
         f"Médio {xstats.DISTANCE_SHORT_MAX_M:.0f}–{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
         f"Longo &gt;{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
-        f"Distance Index: elegível com passes na faixa ≥ P{xstats.DISTANCE_INDEX_MIN_PASS_PERCENTILE} da posição</p>",
+        f"Distance Index: elegível com passes na faixa ≥ P{xstats.DISTANCE_INDEX_MIN_PASS_PERCENTILE} da posição · "
+        f"grades Poor / Under Average / Average / Above Average / Good</p>",
         unsafe_allow_html=True,
     )
     st.html(_build_stats_panel_html(profile), width="stretch")
