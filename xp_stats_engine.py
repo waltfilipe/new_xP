@@ -218,74 +218,55 @@ def apply_per90_metrics(metrics: dict[str, float | int], minutes: float | None) 
     metrics["xp_threat_forward_p90"] = float(metrics.get("xp_threat_forward", 0)) * factor
 
 
-# (section_title, metric_keys)
-XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Volume & Effectiveness", (
-        "xp_m4_total", "xp_per_90", "xp_m4_threat_passes_p90", "xp_m4_per_pass",
-        "xp_m4_threat_rate", "passes_completed",
-    )),
+# (section_title, metric_keys, optional summary eval keys: per_pass, threat_rate)
+XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...], tuple[str, str] | None], ...] = (
+    ("Total", (
+        "xp_per_90", "xp_m4_per_pass", "xp_m4_threat_rate",
+    ), ("xp_m4_per_pass", "xp_m4_threat_rate")),
     (f"Short ({DISTANCE_BAND_LABELS['short']})", (
-        "xp_dist_index_short",
-        "xp_m4_per_pass_short",
-        "xp_m4_threat_rate_short",
-        "xp_m4_threat_short_p90",
-        "passes_short",
-    )),
+        "xp_m4_per_pass_short", "xp_m4_threat_rate_short",
+    ), ("xp_m4_per_pass_short", "xp_m4_threat_rate_short")),
     (f"Medium ({DISTANCE_BAND_LABELS['medium']})", (
-        "xp_dist_index_medium",
-        "xp_m4_per_pass_medium",
-        "xp_m4_threat_rate_medium",
-        "xp_m4_threat_medium_p90",
-        "passes_medium",
-    )),
+        "xp_m4_per_pass_medium", "xp_m4_threat_rate_medium",
+    ), ("xp_m4_per_pass_medium", "xp_m4_threat_rate_medium")),
     (f"Long ({DISTANCE_BAND_LABELS['long']})", (
-        "xp_dist_index_long",
-        "xp_m4_per_pass_long",
-        "xp_m4_threat_rate_long",
-        "xp_m4_threat_long_p90",
-        "passes_long",
-    )),
+        "xp_m4_per_pass_long", "xp_m4_threat_rate_long",
+    ), ("xp_m4_per_pass_long", "xp_m4_threat_rate_long")),
     ("Progressão e direção", (
         "xp_prog_total", "xp_static_total", "xp_prog_share",
         "xp_threat_forward_p90", "xp_prog_efficiency",
-    )),
+    ), None),
     ("Por zona do campo", (
         "xp_total_def", "xp_total_mid", "xp_total_att",
         "xp_threat_def_p90", "xp_threat_mid_p90", "xp_threat_att_p90",
         "xp_final_third_share", "xp_from_deep", "xp_zone_lift_att_def",
-    )),
+    ), None),
     ("Canais e rotas", (
         "xp_wide_total", "xp_central_total", "xp_wide_share",
         "xp_switch_total", "xp_line_break_total",
-    )),
+    ), None),
     ("Qualidade e threat", (
         "xp_residual_positive", "xp_residual_negative", "xp_surprise_rate",
         "xp_threat_conversion", "xp_threat_mean_xp", "xp_threat_mean_residual",
         "xp_m4_p90", "xp_max_pass",
-    )),
+    ), None),
     ("Consistência", (
         "xp_game_mean", "xp_game_std", "xp_pass_cv",
         "xp_games_above_median_pct", "xp_pass_std",
-    )),
+    ), None),
     ("Contexto", (
         "xp_build_up", "xp_finalization",
         "xp_home_total", "xp_away_total", "xp_home_share",
-    )),
+    ), None),
     ("Índices compostos", (
         "xp_threat_index", "xp_progressive_index", "xp_creator_score", "xp_builder_score",
-    )),
+    ), None),
 )
 
 XP_STATS_LABELS: dict[str, str] = {
-    "xp_m4_total": "xP Total",
-    "xp_per_90": "xP per 90",
-    "xp_m4_threat_passes_p90": "xP Threat Passes (Per game)",
+    "xp_per_90": "xP (Per game)",
     "xp_m4_per_pass": "xP/Passe",
     "xp_m4_threat_rate": "% Threat Passes",
-    "passes_completed": "Passes completados",
-    "xp_dist_index_short": "Distance Index",
-    "xp_dist_index_medium": "Distance Index",
-    "xp_dist_index_long": "Distance Index",
     "xp_m4_per_pass_short": "xP/Passe",
     "xp_m4_per_pass_medium": "xP/Passe",
     "xp_m4_per_pass_long": "xP/Passe",
@@ -350,7 +331,7 @@ XP_STATS_LABELS: dict[str, str] = {
 XP_STATS_RANK_METRICS: tuple[str, ...] = tuple(
     dict.fromkeys(
         key
-        for _title, keys in XP_STATS_SECTIONS
+        for _title, keys, _summary in XP_STATS_SECTIONS
         for key in keys
     )
 )
@@ -560,6 +541,20 @@ def attach_all_stats_ranks(players: list[dict]) -> None:
             for rank, row in enumerate(rows, start=1):
                 row[f"{metric}_rank_in_group"] = rank
                 row[f"{metric}_rank_pool_in_group"] = pool_size
+
+
+def metric_qualitative_grade(profile: dict, key: str) -> str | None:
+    rank = profile.get(f"{key}_rank_in_group")
+    total = profile.get(f"{key}_rank_pool_in_group")
+    if not rank or not total:
+        return None
+    return _grade_from_rank_pct(float(rank) / float(total))
+
+
+def format_threat_rate_display(value: float | int | None) -> str:
+    if value is None:
+        return "—"
+    return f"{100 * float(value):.1f}%"
 
 
 def stats_metric_label(key: str) -> str:

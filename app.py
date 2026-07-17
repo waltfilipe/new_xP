@@ -2222,6 +2222,41 @@ st.markdown(
         border: 1px solid rgba(255,255,255,0.18);
         white-space: nowrap;
     }
+    .stats-title-eval {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.35rem 0.55rem;
+        margin-left: auto;
+        color: #94a3b8;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        text-transform: none;
+    }
+    .stats-title-eval-label {
+        color: #cbd5e1;
+        font-weight: 700;
+    }
+    .stats-title-eval-pct {
+        color: #e2e8f0;
+        font-weight: 800;
+        min-width: 3.2rem;
+        text-align: right;
+    }
+    .stats-grade-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 92px;
+        padding: 3px 9px;
+        border-radius: 7px;
+        font-size: 0.72rem;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        border: 1px solid rgba(255,255,255,0.18);
+        white-space: nowrap;
+    }
     .stats-panel .stat-section-row { margin-top: 0.65rem; }
     .stats-panel .stat-section-row:first-child { margin-top: 0.15rem; }
     .stats-player-head {
@@ -5634,8 +5669,6 @@ def _maps_distance_label(distance_band: str) -> str:
 def _xp_stats_metric_ranks_dict(profile: dict, keys: tuple[str, ...]) -> dict:
     ranks: dict[str, dict[str, int]] = {}
     for key in keys:
-        if key.startswith("xp_dist_index_"):
-            continue
         rank = profile.get(f"{key}_rank_in_group")
         total = profile.get(f"{key}_rank_pool_in_group")
         if rank and total:
@@ -5643,7 +5676,7 @@ def _xp_stats_metric_ranks_dict(profile: dict, keys: tuple[str, ...]) -> dict:
     return ranks
 
 
-def _distance_index_grade_score(grade: str | None) -> float | None:
+def _metric_grade_score(grade: str | None) -> float | None:
     if not grade:
         return None
     mapping = {
@@ -5656,32 +5689,34 @@ def _distance_index_grade_score(grade: str | None) -> float | None:
     return mapping.get(grade)
 
 
-def _distance_index_grade_pill_html(profile: dict, band: str) -> str:
-    if not profile.get(f"xp_dist_index_{band}_eligible", True):
-        return '<span class="dist-index-grade-pill" style="background:#334155;color:#f8fafc">— (&lt; P20)</span>'
-    grade = xstats.distance_index_grade_for_profile(profile, band)
+def _metric_grade_pill_html(grade: str | None) -> str:
     if not grade:
-        return '<span class="dist-index-grade-pill" style="background:#334155;color:#f8fafc">—</span>'
-    score = _distance_index_grade_score(grade)
+        return '<span class="stats-grade-pill" style="background:#334155;color:#f8fafc">—</span>'
+    score = _metric_grade_score(grade)
     bg = score_display_color(score) if score is not None else "#334155"
     txt = _badge_text_color(bg)
     return (
-        f'<span class="dist-index-grade-pill" style="background:{bg};color:{txt}">'
+        f'<span class="stats-grade-pill" style="background:{bg};color:{txt}">'
         f"{html.escape(grade)}</span>"
     )
 
 
+def _stats_pair_eval_summary_html(profile: dict, per_pass_key: str, rate_key: str) -> str:
+    per_grade = xstats.metric_qualitative_grade(profile, per_pass_key)
+    rate_grade = xstats.metric_qualitative_grade(profile, rate_key)
+    rate_pct = xstats.format_threat_rate_display(profile.get(rate_key))
+    return (
+        '<span class="stats-title-eval">'
+        '<span class="stats-title-eval-label">xP/Passe</span>'
+        f"{_metric_grade_pill_html(per_grade)}"
+        '<span class="stats-title-eval-label">% Threat</span>'
+        f'<span class="stats-title-eval-pct">{html.escape(rate_pct)}</span>'
+        f"{_metric_grade_pill_html(rate_grade)}"
+        "</span>"
+    )
+
+
 def _stats_metric_line_html(profile: dict, key: str, metric_ranks: dict) -> str:
-    if key.startswith("xp_dist_index_"):
-        band = key.removeprefix("xp_dist_index_")
-        value_html = _distance_index_grade_pill_html(profile, band)
-        label_html = html.escape(xstats.stats_metric_label(key))
-        return (
-            '<div class="metric-line">'
-            f"<span>{label_html}</span>"
-            f'<span style="text-align:right">{value_html}</span>'
-            "</div>"
-        )
     return _metric_line_html(
         xstats.stats_metric_label(key),
         key,
@@ -5694,16 +5729,18 @@ def _stats_metric_line_html(profile: dict, key: str, metric_ranks: dict) -> str:
     )
 
 
-def _stats_section_summary_html(profile: dict, section_title: str, keys: tuple[str, ...]) -> str:
-    dist_keys = [key for key in keys if key.startswith("xp_dist_index_")]
-    badge_html = ""
-    if len(dist_keys) == 1:
-        band = dist_keys[0].removeprefix("xp_dist_index_")
-        badge_html = _distance_index_grade_pill_html(profile, band)
+def _stats_section_summary_html(
+    profile: dict,
+    section_title: str,
+    summary_keys: tuple[str, str] | None,
+) -> str:
+    eval_html = ""
+    if summary_keys:
+        eval_html = _stats_pair_eval_summary_html(profile, summary_keys[0], summary_keys[1])
     title_row = (
         f'<div class="grade-card-title-row">'
         f'<div class="grade-card-title">{html.escape(section_title)}</div>'
-        f"{badge_html}"
+        f"{eval_html}"
         f"</div>"
     )
     return (
@@ -5715,14 +5752,19 @@ def _stats_section_summary_html(profile: dict, section_title: str, keys: tuple[s
     )
 
 
-def _stats_section_accordion_html(profile: dict, section_title: str, keys: tuple[str, ...]) -> str:
+def _stats_section_accordion_html(
+    profile: dict,
+    section_title: str,
+    keys: tuple[str, ...],
+    summary_keys: tuple[str, str] | None,
+) -> str:
     metric_ranks = _xp_stats_metric_ranks_dict(profile, keys)
     lines = "".join(_stats_metric_line_html(profile, key, metric_ranks) for key in keys)
     return (
         '<details class="grade-accordion" name="stats-sections">'
         "<summary>"
         '<i class="fa-solid fa-chevron-right grade-arrow" aria-hidden="true"></i>'
-        f"{_stats_section_summary_html(profile, section_title, keys)}"
+        f"{_stats_section_summary_html(profile, section_title, summary_keys)}"
         "</summary>"
         f'<div class="grade-accordion-body">{lines}</div>'
         "</details>"
@@ -5731,8 +5773,8 @@ def _stats_section_accordion_html(profile: dict, section_title: str, keys: tuple
 
 def _build_stats_panel_html(profile: dict) -> str:
     parts: list[str] = ['<div class="stats-panel">']
-    for section_title, keys in xstats.XP_STATS_SECTIONS:
-        parts.append(_stats_section_accordion_html(profile, section_title, keys))
+    for section_title, keys, summary_keys in xstats.XP_STATS_SECTIONS:
+        parts.append(_stats_section_accordion_html(profile, section_title, keys, summary_keys))
     parts.append("</div>")
     return "".join(parts)
 
@@ -5756,7 +5798,6 @@ def render_stats_section(
         players_by_id,
         xp_by_id=xp_by_id,
         key_prefix="stats",
-        sort_by="dist_index_mean",
     )
     if not player_id:
         return
@@ -5775,8 +5816,7 @@ def render_stats_section(
         f"Barras = posição no grupo · Curto &lt;{xstats.DISTANCE_SHORT_MAX_M:.0f} m · "
         f"Médio {xstats.DISTANCE_SHORT_MAX_M:.0f}–{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
         f"Longo &gt;{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
-        f"Distance Index: elegível com passes na faixa ≥ P{xstats.DISTANCE_INDEX_MIN_PASS_PERCENTILE} da posição · "
-        f"grades balanceados (xP/Passe, % Threat, Threat p/game) com peso leve de volume</p>",
+        f"título = grade de xP/Passe e % Threat (valor em xx.x%)</p>",
         unsafe_allow_html=True,
     )
     st.html(_build_stats_panel_html(profile), width="stretch")
