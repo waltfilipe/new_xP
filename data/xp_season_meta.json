@@ -1,8 +1,8 @@
 {
-  "version": "m4_od_12x8_b4_a2_pr0_blend40_pl_dist15_v1",
+  "version": "m4_od_12x8_b4_a2_pr0_global_ita_dist15_v1",
   "passes": 119654,
   "completed": 95128,
-  "threats": 7087,
+  "threats": 7067,
   "players": 580,
   "matches": 156
 }

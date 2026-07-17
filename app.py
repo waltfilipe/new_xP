@@ -6118,15 +6118,16 @@ def render_estudo_section() -> None:
 
     st.markdown(
         f"**Partida:** {match_title} · **Data:** {meta.get('match_date', '—')} · "
-        f"**ID:** `{meta.get('event_id', '—')}` · **α = {alpha:.2f}**"
+        f"**ID:** `{meta.get('event_id', '—')}` · **referência global (α = {alpha:.2f})**"
     )
     st.caption(
-        f"**Modelo 3:** suavização hierárquica por **destino 12×8** (partida + liga). "
-        f"**Modelo 4:** suavização por **origem 12×8 → destino 12×8**. "
+        f"**Modelo 3:** suavização hierárquica por **destino 12×8** (referência global). "
+        f"**Modelo 4:** suavização por **origem 12×8 → destino 12×8** (referência global). "
         f"xP escalado em 0–{xp_max:.1f} (célula mais rara = {xp_max:.1f}; demais passes proporcionais). "
-        f"Referência global: Série B ({meta.get('league_matches_serie_b', '—')}) + "
-        f"Série A ({meta.get('league_matches_serie_a', '—')}) + "
-        f"Premier League ({meta.get('league_matches_premier_league', '—')}) = "
+        f"Pool global: Série B ({meta.get('league_matches_serie_b', '—')}) + "
+        f"Série A BR ({meta.get('league_matches_serie_a', '—')}) + "
+        f"Premier League ({meta.get('league_matches_premier_league', '—')}) + "
+        f"Serie A Itália ({meta.get('league_matches_italia_seriea', '—')}) = "
         f"{meta.get('league_matches', '—')} partidas · "
         f"{meta.get('league_passes', 0):,} passes completos."
     )

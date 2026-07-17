@@ -57,6 +57,7 @@ SEASON_ALL_CSV_PATH = Path(__file__).resolve().parent / "season_all_newserieb.cs
 SEASON_ALL_BR_CSV_PATH = Path(__file__).resolve().parent / "season_all_br.csv"
 SEASON_ALL_BR_FULL_CSV_PATH = Path(__file__).resolve().parent / "season_all_brfull.csv"
 SEASON_ALL_PL_CSV_PATH = Path(__file__).resolve().parent / "season_all_PL.csv"
+SEASON_ALL_ITALIA_SERIEA_CSV_PATH = Path(__file__).resolve().parent / "season_all_italiaseriea.csv"
 PLAYER_MATCH_STATS_PATH = Path(__file__).resolve().parent / "player_match_stats.csv"
 DATA_CACHE_VERSION = 63
 
@@ -786,6 +787,14 @@ def _load_pl_pass_frame() -> pd.DataFrame:
     if not SEASON_ALL_PL_CSV_PATH.exists():
         return pd.DataFrame()
     frame = pd.read_csv(SEASON_ALL_PL_CSV_PATH, low_memory=False)
+    frame = frame[frame["category"].astype(str).str.lower() == "passes"]
+    return resolve_positions_in_csv_frame(frame)
+
+
+def _load_italia_seriea_pass_frame() -> pd.DataFrame:
+    if not SEASON_ALL_ITALIA_SERIEA_CSV_PATH.exists():
+        return pd.DataFrame()
+    frame = pd.read_csv(SEASON_ALL_ITALIA_SERIEA_CSV_PATH, low_memory=False)
     frame = frame[frame["category"].astype(str).str.lower() == "passes"]
     return resolve_positions_in_csv_frame(frame)
 
