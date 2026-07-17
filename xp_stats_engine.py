@@ -24,6 +24,7 @@ DISTANCE_BAND_LABELS = xse.DISTANCE_BAND_LABELS
 DISTANCE_SHORT_MAX_M = pe.DISTANCE_SHORT_MAX_M
 DISTANCE_MEDIUM_MAX_M = pe.DISTANCE_MEDIUM_MAX_M
 BANDS = xse.DISTANCE_BAND_ORDER
+DISTANCE_INDEX_MIN_PASS_PERCENTILE = 20
 
 
 def _zone_x(x: np.ndarray) -> np.ndarray:
@@ -366,7 +367,7 @@ def attach_composite_indices(players: list[dict]) -> None:
 
 
 def attach_distance_indices(players: list[dict]) -> None:
-    """Within-position z-score index per distance band (quality + threat rate + threat p90)."""
+    """Within-position z-score index per band; pool restricted to players at >= P20 passes."""
     if not players:
         return
     pools: dict[str, list[dict]] = {}
@@ -380,11 +381,44 @@ def attach_distance_indices(players: list[dict]) -> None:
             per_pass_col = f"xp_m4_per_pass_{band}"
             rate_col = f"xp_m4_threat_rate_{band}"
             p90_col = f"xp_m4_threat_{band}_p90"
-            z_per = _zscore(df.get(per_pass_col, pd.Series(0.0, index=df.index)).astype(float))
-            z_rate = _zscore(df.get(rate_col, pd.Series(0.0, index=df.index)).astype(float))
-            z_p90 = _zscore(df.get(p90_col, pd.Series(0.0, index=df.index)).astype(float))
+            passes_col = f"passes_{band}"
+            pass_counts = df.get(passes_col, pd.Series(0, index=df.index)).astype(float)
+            min_passes = float(
+                np.percentile(pass_counts.to_numpy(dtype=float), DISTANCE_INDEX_MIN_PASS_PERCENTILE)
+            )
+            eligible = pass_counts >= min_passes
+
             for i, row in enumerate(rows):
-                row[f"xp_dist_index_{band}"] = float(z_per.iloc[i] + z_rate.iloc[i] + z_p90.iloc[i])
+                row[f"xp_dist_index_{band}_min_passes"] = min_passes
+                row[f"xp_dist_index_{band}_eligible"] = bool(eligible.iloc[i])
+
+            if int(eligible.sum()) < 2:
+                for row in rows:
+                    row[f"xp_dist_index_{band}"] = None
+                continue
+
+            sub = df.loc[eligible]
+            z_per = _zscore(sub[per_pass_col].astype(float))
+            z_rate = _zscore(sub[rate_col].astype(float))
+            z_p90 = _zscore(sub[p90_col].astype(float))
+            z_sum = z_per + z_rate + z_p90
+
+            eligible_rows = [rows[i] for i in sub.index]
+            ranked = sorted(
+                zip(eligible_rows, z_sum.tolist()),
+                key=lambda item: float(item[1]),
+                reverse=True,
+            )
+            for rank, (row, z_val) in enumerate(ranked, start=1):
+                row[f"xp_dist_index_{band}"] = float(z_val)
+                row[f"xp_dist_index_{band}_rank_in_group"] = rank
+                row[f"xp_dist_index_{band}_rank_pool_in_group"] = len(ranked)
+
+            for i, row in enumerate(rows):
+                if not eligible.iloc[i]:
+                    row[f"xp_dist_index_{band}"] = None
+                    row.pop(f"xp_dist_index_{band}_rank_in_group", None)
+                    row.pop(f"xp_dist_index_{band}_rank_pool_in_group", None)
 
 
 def attach_all_stats_ranks(players: list[dict]) -> None:
@@ -396,6 +430,8 @@ def attach_all_stats_ranks(players: list[dict]) -> None:
     for rows in pools.values():
         pool_size = len(rows)
         for metric in XP_STATS_RANK_METRICS:
+            if metric.startswith("xp_dist_index_"):
+                continue
             rows.sort(key=lambda row: float(row.get(metric) or 0.0), reverse=True)
             for rank, row in enumerate(rows, start=1):
                 row[f"{metric}_rank_in_group"] = rank
@@ -415,6 +451,8 @@ def format_stats_value(key: str, value: float | int | None) -> str:
     if key.startswith("passes_"):
         return f"{int(val):,}"
     if key.startswith("xp_dist_index_"):
+        if value is None:
+            return "— (< P20)"
         return f"{val:.2f}"
     if key.endswith("_rate") or key.endswith("_share") or key.endswith("_pct") or key == "xp_surprise_rate" or key == "xp_threat_conversion":
         if key == "xp_m4_threat_rate" or key.startswith("xp_m4_threat_rate_"):

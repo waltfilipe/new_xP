@@ -5601,6 +5601,8 @@ def _maps_distance_label(distance_band: str) -> str:
 def _xp_stats_metric_ranks_dict(profile: dict, keys: tuple[str, ...]) -> dict:
     ranks: dict[str, dict[str, int]] = {}
     for key in keys:
+        if key.startswith("xp_dist_index_") and not profile.get(f"{key}_eligible", True):
+            continue
         rank = profile.get(f"{key}_rank_in_group")
         total = profile.get(f"{key}_rank_pool_in_group")
         if rank and total:
@@ -5666,7 +5668,8 @@ def render_stats_section(
         f'{html.escape(str(profile.get("position", "—")))} · {html.escape(group_label)} · '
         f"Barras = posição no grupo · Curto &lt;{xstats.DISTANCE_SHORT_MAX_M:.0f} m · "
         f"Médio {xstats.DISTANCE_SHORT_MAX_M:.0f}–{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
-        f'Longo &gt;{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m</p>',
+        f"Longo &gt;{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
+        f"Distance Index: elegível com passes na faixa ≥ P{xstats.DISTANCE_INDEX_MIN_PASS_PERCENTILE} da posição</p>",
         unsafe_allow_html=True,
     )
     st.html(_build_stats_panel_html(profile), width="stretch")
