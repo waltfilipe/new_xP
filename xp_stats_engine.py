@@ -264,6 +264,23 @@ XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+def p20_pass_thresholds_by_group(
+    players: list[dict],
+    passes_col: str,
+    *,
+    percentile: int = DISTANCE_INDEX_MIN_PASS_PERCENTILE,
+) -> dict[str, float]:
+    """Minimum passes at the position-group percentile (default P20)."""
+    pools: dict[str, list[float]] = {}
+    for player in players:
+        group = str(player.get("position_group") or "CM")
+        pools.setdefault(group, []).append(float(player.get(passes_col) or 0.0))
+    return {
+        group: float(np.percentile(counts, percentile)) if counts else 0.0
+        for group, counts in pools.items()
+    }
+
+
 def iter_xp_stats_sections() -> tuple[tuple[str, tuple[str, ...]], ...]:
     """Yield (title, keys) for every Stats tab section."""
     for entry in XP_STATS_SECTIONS:

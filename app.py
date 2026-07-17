@@ -5716,8 +5716,8 @@ def _build_stats_panel_html(profile: dict) -> str:
     return "".join(parts)
 
 
-XP_SCATTER_BAND_METRICS: dict[str, tuple[str, str, str | None]] = {
-    "all": ("xp_m4_per_pass", "xp_m4_total", None),
+XP_SCATTER_BAND_METRICS: dict[str, tuple[str, str, str]] = {
+    "all": ("xp_m4_per_pass", "xp_m4_total", "passes_completed"),
     "short": ("xp_m4_per_pass_short", "xp_m4_total_short", "passes_short"),
     "medium": ("xp_m4_per_pass_medium", "xp_m4_total_medium", "passes_medium"),
     "long": ("xp_m4_per_pass_long", "xp_m4_total_long", "passes_long"),
@@ -5737,8 +5737,11 @@ def _xp_scatter_pool_players(
     xp_by_id: dict[str, dict] | None,
     position_codes: frozenset[str],
     position_groups: frozenset[str],
-    passes_col: str | None,
-) -> list[dict]:
+    passes_col: str,
+) -> tuple[list[dict], dict[str, float]]:
+    xp_profiles = list((xp_by_id or {}).values())
+    thresholds = xstats.p20_pass_thresholds_by_group(xp_profiles, passes_col)
+
     rows: list[dict] = []
     for player in all_players:
         pid = str(player["player_id"])
@@ -5752,10 +5755,12 @@ def _xp_scatter_pool_players(
         xp_profile = (xp_by_id or {}).get(pid)
         if not xp_profile:
             continue
-        if passes_col and int(xp_profile.get(passes_col) or 0) < 1:
+        group = str(xp_profile.get("position_group") or profile.get("position_group") or "CM")
+        min_passes = float(thresholds.get(group, 0.0))
+        if float(xp_profile.get(passes_col) or 0.0) < min_passes:
             continue
         rows.append({**profile, **xp_profile, "player_id": pid})
-    return rows
+    return rows, thresholds
 
 
 def draw_xp_per_pass_total_scatter(
@@ -5884,7 +5889,7 @@ def _render_xp_scatter_panel(
         return
 
     per_pass_key, total_key, passes_col = XP_SCATTER_BAND_METRICS[distance_band]
-    pool = _xp_scatter_pool_players(
+    pool, thresholds = _xp_scatter_pool_players(
         all_players,
         progression_by_id,
         xp_by_id=xp_by_id,
@@ -5893,7 +5898,10 @@ def _render_xp_scatter_panel(
         passes_col=passes_col,
     )
     if not pool:
-        st.info("Nenhum jogador disponível para os filtros selecionados.")
+        st.info(
+            f"Nenhum jogador elegível (passes ≥ P{xstats.DISTANCE_INDEX_MIN_PASS_PERCENTILE} "
+            f"da posição para {_xp_scatter_distance_label(distance_band).lower()})."
+        )
         return
 
     position_label = _selected_position_blocks_label(STATS_SCATTER_POSITION_BLOCKS_KEY)
@@ -5907,7 +5915,15 @@ def _render_xp_scatter_panel(
         highlight_player_id=highlight_player_id,
     )
     st.pyplot(fig, clear_figure=True, use_container_width=True)
-    st.caption(f"{len(pool)} jogadores no pool · destaque = jogador selecionado acima")
+    min_passes_hint = ", ".join(
+        f"{html.escape(position_group_label(group))}: ≥{threshold:.0f}"
+        for group, threshold in sorted(thresholds.items())
+        if any(str(row.get("position_group") or "CM") == group for row in pool)
+    )
+    st.caption(
+        f"{len(pool)} jogadores elegíveis · mínimo P{xstats.DISTANCE_INDEX_MIN_PASS_PERCENTILE} "
+        f"({min_passes_hint or '—'}) · destaque = jogador selecionado acima"
+    )
 
 
 def render_stats_section(
