@@ -263,6 +263,20 @@ XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...], tuple[str, str] | None], ..
     ), None),
 )
 
+
+def iter_xp_stats_sections() -> tuple[tuple[str, tuple[str, ...], tuple[str, str] | None], ...]:
+    """Yield (title, keys, summary_keys) regardless of legacy 2-tuple storage."""
+    out: list[tuple[str, tuple[str, ...], tuple[str, str] | None]] = []
+    for entry in XP_STATS_SECTIONS:
+        if len(entry) == 2:
+            title, keys = entry  # type: ignore[misc]
+            out.append((title, keys, None))
+        else:
+            title, keys, summary_keys = entry
+            out.append((title, keys, summary_keys))
+    return tuple(out)
+
+
 XP_STATS_LABELS: dict[str, str] = {
     "xp_per_90": "xP (Per game)",
     "xp_m4_per_pass": "xP/Passe",
@@ -331,7 +345,7 @@ XP_STATS_LABELS: dict[str, str] = {
 XP_STATS_RANK_METRICS: tuple[str, ...] = tuple(
     dict.fromkeys(
         key
-        for _title, keys, _summary in XP_STATS_SECTIONS
+        for _title, keys, _summary in iter_xp_stats_sections()
         for key in keys
     )
 )

@@ -88,12 +88,13 @@ def _load_xp_stats_engine():
     module_path = _APP_ROOT / "xp_stats_engine.py"
     if not module_path.is_file():
         raise ImportError(f"File not found: {module_path}")
-    spec = importlib.util.spec_from_file_location("passes_xt_xp_stats_engine", module_path)
+    module_name = "passes_xt_xp_stats_engine"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not load {module_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    sys.modules["passes_xt_xp_stats_engine"] = module
+    sys.modules[module_name] = module
     sys.modules["xp_stats_engine"] = module
     return module
 
@@ -5771,9 +5772,24 @@ def _stats_section_accordion_html(
     )
 
 
+def _iter_stats_sections() -> list[tuple[str, tuple[str, ...], tuple[str, str] | None]]:
+    """Normalize XP_STATS_SECTIONS to (title, keys, summary_keys) triples."""
+    if hasattr(xstats, "iter_xp_stats_sections"):
+        return list(xstats.iter_xp_stats_sections())
+    out: list[tuple[str, tuple[str, ...], tuple[str, str] | None]] = []
+    for entry in xstats.XP_STATS_SECTIONS:
+        if len(entry) == 2:
+            title, keys = entry
+            out.append((title, keys, None))
+        else:
+            title, keys, summary_keys = entry
+            out.append((title, keys, summary_keys))
+    return out
+
+
 def _build_stats_panel_html(profile: dict) -> str:
     parts: list[str] = ['<div class="stats-panel">']
-    for section_title, keys, summary_keys in xstats.XP_STATS_SECTIONS:
+    for section_title, keys, summary_keys in _iter_stats_sections():
         parts.append(_stats_section_accordion_html(profile, section_title, keys, summary_keys))
     parts.append("</div>")
     return "".join(parts)
