@@ -165,6 +165,8 @@ PLAYER_ANALYSIS_POSITION_BLOCKS_KEY = "pa_position_blocks"
 MAPS_SHORT_PASS_ONLY_KEY = "maps_short_pass_only"
 MAPS_XP_THREAT_ONLY_KEY = "maps_xp_threat_only"
 MAPS_XP_DISTANCE_KEY = "maps_xp_distance_band"
+STATS_XP_SCATTER_DISTANCE_KEY = "stats_xp_scatter_distance"
+STATS_SCATTER_POSITION_BLOCKS_KEY = "stats_scatter_position_blocks"
 ESTUDO_PLAYER_SELECT_KEY = "estudo_player_select"
 PLAYER_ANALYSIS_POSITION_BLOCKS: tuple[tuple[str, str, frozenset[str] | None, str | None], ...] = (
     ("cb", "Zagueiros", frozenset({"CB", "RCB", "LCB"}), None),
@@ -2223,41 +2225,6 @@ st.markdown(
         border: 1px solid rgba(255,255,255,0.18);
         white-space: nowrap;
     }
-    .stats-title-eval {
-        display: inline-flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.35rem 0.55rem;
-        margin-left: auto;
-        color: #94a3b8;
-        font-size: 0.72rem;
-        font-weight: 600;
-        letter-spacing: 0.01em;
-        text-transform: none;
-    }
-    .stats-title-eval-label {
-        color: #cbd5e1;
-        font-weight: 700;
-    }
-    .stats-title-eval-pct {
-        color: #e2e8f0;
-        font-weight: 800;
-        min-width: 3.2rem;
-        text-align: right;
-    }
-    .stats-grade-pill {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 92px;
-        padding: 3px 9px;
-        border-radius: 7px;
-        font-size: 0.72rem;
-        font-weight: 800;
-        letter-spacing: 0.02em;
-        border: 1px solid rgba(255,255,255,0.18);
-        white-space: nowrap;
-    }
     .stats-panel .stat-section-row { margin-top: 0.65rem; }
     .stats-panel .stat-section-row:first-child { margin-top: 0.15rem; }
     .stats-player-head {
@@ -3362,8 +3329,11 @@ def _rating_group_from_blocks(block_ids: set[str]) -> str | None:
     return None
 
 
-def _render_position_block_slicer(*, key_prefix: str = "pa") -> tuple[frozenset[str], frozenset[str]]:
-    state_key = PLAYER_ANALYSIS_POSITION_BLOCKS_KEY
+def _render_position_block_slicer(
+    *,
+    key_prefix: str = "pa",
+    state_key: str = PLAYER_ANALYSIS_POSITION_BLOCKS_KEY,
+) -> tuple[frozenset[str], frozenset[str]]:
     if state_key not in st.session_state or not st.session_state[state_key]:
         st.session_state[state_key] = {PLAYER_ANALYSIS_POSITION_BLOCKS[0][0]}
 
@@ -3380,9 +3350,10 @@ def _render_position_block_slicer(*, key_prefix: str = "pa") -> tuple[frozenset[
                 use_container_width=True,
             ):
                 st.session_state[state_key] = {block_id}
-                st.session_state.pop(PLAYER_ANALYSIS_SELECT_KEY, None)
-                _clear_player_select_widgets()
-                st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
+                if state_key == PLAYER_ANALYSIS_POSITION_BLOCKS_KEY:
+                    st.session_state.pop(PLAYER_ANALYSIS_SELECT_KEY, None)
+                    _clear_player_select_widgets()
+                    st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
                 st.rerun()
 
     return _position_filter_from_blocks(selected)
@@ -5745,6 +5716,200 @@ def _build_stats_panel_html(profile: dict) -> str:
     return "".join(parts)
 
 
+XP_SCATTER_BAND_METRICS: dict[str, tuple[str, str, str | None]] = {
+    "all": ("xp_m4_per_pass", "xp_m4_total", None),
+    "short": ("xp_m4_per_pass_short", "xp_m4_total_short", "passes_short"),
+    "medium": ("xp_m4_per_pass_medium", "xp_m4_total_medium", "passes_medium"),
+    "long": ("xp_m4_per_pass_long", "xp_m4_total_long", "passes_long"),
+}
+
+
+def _xp_scatter_distance_label(distance_band: str) -> str:
+    if distance_band == "all":
+        return "Total"
+    return xe.BAND_LABELS.get(distance_band, distance_band)
+
+
+def _xp_scatter_pool_players(
+    all_players: list[dict],
+    progression_by_id: dict[str, dict],
+    *,
+    xp_by_id: dict[str, dict] | None,
+    position_codes: frozenset[str],
+    position_groups: frozenset[str],
+    passes_col: str | None,
+) -> list[dict]:
+    rows: list[dict] = []
+    for player in all_players:
+        pid = str(player["player_id"])
+        profile = progression_by_id.get(pid, player)
+        if not _player_matches_position_filter(
+            profile,
+            position_codes=position_codes,
+            position_groups=position_groups,
+        ):
+            continue
+        xp_profile = (xp_by_id or {}).get(pid)
+        if not xp_profile:
+            continue
+        if passes_col and int(xp_profile.get(passes_col) or 0) < 1:
+            continue
+        rows.append({**profile, **xp_profile, "player_id": pid})
+    return rows
+
+
+def draw_xp_per_pass_total_scatter(
+    players: list[dict],
+    *,
+    per_pass_key: str,
+    total_key: str,
+    distance_label: str,
+    position_label: str,
+    highlight_player_id: str | None = None,
+):
+    import math
+    import matplotlib.pyplot as plt
+
+    xs: list[float] = []
+    ys: list[float] = []
+    for row in players:
+        try:
+            x_val = float(row.get(per_pass_key))
+            y_val = float(row.get(total_key))
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(x_val) and math.isfinite(y_val)):
+            continue
+        xs.append(x_val)
+        ys.append(y_val)
+
+    fig, ax = plt.subplots(figsize=(8.4, 5.6), facecolor="#0f172a")
+    ax.set_facecolor("#0f172a")
+
+    if xs:
+        ax.scatter(
+            xs,
+            ys,
+            s=42,
+            c="#60a5fa",
+            alpha=0.78,
+            edgecolors="#1e3a5f",
+            linewidths=0.6,
+            zorder=2,
+        )
+
+    if highlight_player_id:
+        for row in players:
+            if str(row.get("player_id")) != str(highlight_player_id):
+                continue
+            try:
+                hx = float(row.get(per_pass_key))
+                hy = float(row.get(total_key))
+            except (TypeError, ValueError):
+                break
+            if not (math.isfinite(hx) and math.isfinite(hy)):
+                break
+            ax.scatter(
+                [hx],
+                [hy],
+                s=140,
+                c="#fbbf24",
+                edgecolors="#f8fafc",
+                linewidths=1.4,
+                zorder=5,
+            )
+            ax.annotate(
+                str(row.get("player_name", "—")),
+                (hx, hy),
+                xytext=(7, 7),
+                textcoords="offset points",
+                color="#f8fafc",
+                fontsize=8.5,
+                fontweight="bold",
+                zorder=6,
+            )
+            break
+
+    ax.set_xlabel("xP/Passe", color="#cbd5e1", fontsize=10)
+    ax.set_ylabel("xP Total", color="#cbd5e1", fontsize=10)
+    ax.set_title(
+        f"xP/Passe vs xP Total · {distance_label} · {position_label}",
+        color="#f8fafc",
+        fontsize=11,
+        pad=10,
+    )
+    ax.tick_params(colors="#94a3b8")
+    for spine in ax.spines.values():
+        spine.set_color("#334155")
+    ax.grid(True, alpha=0.22, color="#475569", linestyle="--", linewidth=0.6)
+    fig.tight_layout()
+    return fig
+
+
+def _selected_position_blocks_label(state_key: str) -> str:
+    selected = st.session_state.get(state_key) or set()
+    labels = [
+        label
+        for block_id, label, _codes, _rating_group in PLAYER_ANALYSIS_POSITION_BLOCKS
+        if block_id in selected
+    ]
+    return ", ".join(labels) if labels else "—"
+
+
+def _render_xp_scatter_panel(
+    all_players: list[dict],
+    progression_by_id: dict[str, dict],
+    *,
+    xp_by_id: dict[str, dict] | None,
+    highlight_player_id: str | None = None,
+) -> None:
+    st.markdown("### Dispersão xP/Passe × xP Total")
+    filter_col, dist_col = st.columns([2.1, 1], gap="medium")
+    with filter_col:
+        with st.container(key="stats_scatter_position_blocks"):
+            position_codes, position_groups = _render_position_block_slicer(
+                key_prefix="stats_scatter",
+                state_key=STATS_SCATTER_POSITION_BLOCKS_KEY,
+            )
+    with dist_col:
+        distance_band = st.selectbox(
+            "Distância",
+            options=["all", *xe.BANDS],
+            format_func=_xp_scatter_distance_label,
+            key=STATS_XP_SCATTER_DISTANCE_KEY,
+        )
+
+    if not position_codes and not position_groups:
+        st.info("Selecione uma posição para ver o gráfico.")
+        return
+
+    per_pass_key, total_key, passes_col = XP_SCATTER_BAND_METRICS[distance_band]
+    pool = _xp_scatter_pool_players(
+        all_players,
+        progression_by_id,
+        xp_by_id=xp_by_id,
+        position_codes=position_codes,
+        position_groups=position_groups,
+        passes_col=passes_col,
+    )
+    if not pool:
+        st.info("Nenhum jogador disponível para os filtros selecionados.")
+        return
+
+    position_label = _selected_position_blocks_label(STATS_SCATTER_POSITION_BLOCKS_KEY)
+
+    fig = draw_xp_per_pass_total_scatter(
+        pool,
+        per_pass_key=per_pass_key,
+        total_key=total_key,
+        distance_label=_xp_scatter_distance_label(distance_band),
+        position_label=position_label,
+        highlight_player_id=highlight_player_id,
+    )
+    st.pyplot(fig, clear_figure=True, use_container_width=True)
+    st.caption(f"{len(pool)} jogadores no pool · destaque = jogador selecionado acima")
+
+
 def render_stats_section(
     all_players: list[dict],
     progression_by_id: dict[str, dict],
@@ -5786,6 +5951,12 @@ def render_stats_section(
     )
     st.html(_build_stats_panel_html(profile), width="stretch")
     st.markdown("</div>", unsafe_allow_html=True)
+    _render_xp_scatter_panel(
+        all_players,
+        progression_by_id,
+        xp_by_id=xp_by_id,
+        highlight_player_id=str(player_id),
+    )
 
 
 def render_maps_section(
