@@ -140,7 +140,7 @@ from progression_maps import (
 xpe = _load_xp_study_engine()
 xe = _load_xp_engine()
 xstats = _load_xp_stats_engine()
-from xp_study_maps import draw_top_xp_passes_map, draw_xp_destination_surface, draw_xp_threat_passes_season_map
+from xp_study_maps import draw_special_passes_season_map, draw_top_xp_passes_map, draw_xp_destination_surface
 
 XP_DATA_CACHE_VERSION = xe.XP_DATA_CACHE_VERSION
 
@@ -164,7 +164,7 @@ PLAYER_ANALYSIS_COMPARE_KEY = "pa_compare_select"
 PLAYER_ANALYSIS_POSITION_BLOCKS_KEY = "pa_position_blocks"
 MAPS_SHORT_PASS_ONLY_KEY = "maps_short_pass_only"
 MAPS_XP_THREAT_ONLY_KEY = "maps_xp_threat_only"
-MAPS_XP_DISTANCE_KEY = "maps_xp_distance_band"
+MAPS_SPECIAL_PASS_KEY = "maps_special_pass_filter"
 STATS_XP_SCATTER_DISTANCE_KEY = "stats_xp_scatter_distance"
 STATS_SCATTER_POSITION_BLOCKS_KEY = "stats_scatter_position_blocks"
 ESTUDO_PLAYER_SELECT_KEY = "estudo_player_select"
@@ -5616,26 +5616,8 @@ def _render_player_analysis_similarity(
         st.write(", ".join(pge.METRIC_LABELS.get(k, k) for k in sim.SIMILARITY_TRADITIONAL_METRICS))
 
 
-def _filter_xp_threat_passes_for_map(
-    passes_df,
-    distance_band: str,
-    *,
-    threat_col: str = xe.THREAT_COL,
-):
-    if passes_df is None or passes_df.empty:
-        return passes_df
-    work = passes_df[passes_df[threat_col]].copy() if threat_col in passes_df.columns else passes_df.iloc[0:0].copy()
-    if work.empty:
-        return work
-    if distance_band and distance_band != "all" and "distance_band" in work.columns:
-        work = work[work["distance_band"] == distance_band].copy()
-    return work
-
-
-def _maps_distance_label(distance_band: str) -> str:
-    if distance_band == "all":
-        return "todas as distâncias"
-    return xe.BAND_LABELS.get(distance_band, distance_band)
+def _filter_special_passes_for_map(passes_df, special_pass_key: str):
+    return xstats.filter_passes_by_special_type(passes_df, special_pass_key)
 
 
 def _xp_stats_metric_ranks_dict(profile: dict, keys: tuple[str, ...]) -> dict:
@@ -6031,7 +6013,7 @@ def render_maps_section(
     *,
     xp_by_id: dict[str, dict] | None = None,
 ) -> None:
-    st.subheader("Maps — xP Threat Passes")
+    st.subheader("Maps — Special Passes")
 
     if not all_players:
         st.info("No players available.")
@@ -6053,34 +6035,34 @@ def render_maps_section(
         st.warning("Could not load player profile.")
         return
 
-    distance_band = st.selectbox(
-        "Distância",
-        options=["all", *xe.BANDS],
-        format_func=lambda band: (
-            "Todas as distâncias" if band == "all" else xe.BAND_LABELS.get(str(band), str(band))
-        ),
-        key=MAPS_XP_DISTANCE_KEY,
+    special_pass_key = st.selectbox(
+        "Special pass",
+        options=list(xstats.SPECIAL_PASS_MAP_FILTER_KEYS),
+        format_func=xstats.special_pass_map_label,
+        key=MAPS_SPECIAL_PASS_KEY,
     )
 
     st.markdown('<div class="pa-maps-compact">', unsafe_allow_html=True)
-    passes_df = _filter_xp_threat_passes_for_map(
+    passes_df = _filter_special_passes_for_map(
         xp_passes_by_player.get(str(player_id)),
-        distance_band,
+        special_pass_key,
     )
     if passes_df is None or passes_df.empty:
-        st.info("Nenhum xP Threat Pass para este jogador com os filtros selecionados.")
+        st.info("Nenhum passe completo para este jogador com o filtro selecionado.")
     else:
-        fig = draw_xp_threat_passes_season_map(
+        threat_count = int(passes_df[xe.THREAT_COL].sum()) if xe.THREAT_COL in passes_df.columns else 0
+        fig = draw_special_passes_season_map(
             passes_df,
             player_name=str(player.get("player_name", "—")),
             season_label=APP_LEAGUE,
-            distance_label=_maps_distance_label(distance_band),
+            category_label=xstats.special_pass_map_label(special_pass_key),
             xp_col=xe.XP_COL,
+            threat_col=xe.THREAT_COL,
         )
         st.pyplot(fig, clear_figure=True, use_container_width=True)
         st.caption(
-            f"Threat = top {int(xe.THREAT_QUANTILE * 100)}% do resíduo xP (progressão ≥ 0) · "
             f"{len(passes_df)} passes exibidos"
+            + (f" · {threat_count} threat passes" if threat_count else "")
         )
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -6799,7 +6781,7 @@ def _render_pres_flow_steps() -> None:
     steps = [
         ("Overview", "Understand the layout and browse xP season rankings."),
         ("Player Analysis", "Deep-dive on a player with xP stats and position ranks."),
-        ("Maps", "Visualize xP Threat Passes by distance band."),
+        ("Maps", "Visualize special passes on the pitch with optional xP coloring."),
     ]
     items = []
     for idx, (title, text) in enumerate(steps, start=1):
@@ -6842,7 +6824,7 @@ def render_presentation_tab(
         if active_demo == "player_analysis":
             _render_presentation_player_analysis_demo()
         elif active_demo == "maps":
-            st.info("Abra a aba Maps para visualizar xP Threat Passes por distância.")
+            st.info("Abra a aba Maps para visualizar special passes no campo.")
         st.markdown("</div>", unsafe_allow_html=True)
 
     _render_pres_flow_steps()

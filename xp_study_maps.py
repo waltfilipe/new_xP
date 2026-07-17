@@ -176,41 +176,54 @@ def draw_top_xp_passes_map(
     return fig
 
 
-def draw_xp_threat_passes_season_map(
+def draw_special_passes_season_map(
     passes,
     *,
     player_name: str,
     season_label: str = "temporada",
-    distance_label: str = "todas as distâncias",
-    xp_col: str = "xp_m4",
+    category_label: str = "Special pass",
+    xp_col: str | None = "xp_m4",
+    threat_col: str = "is_threat_m4",
 ):
-    """Season map of xP threat passes for one player."""
+    """Season map of passes for one special-pass category."""
     fig, ax, pitch = _base_pitch()
 
-    if passes is None or passes.empty or xp_col not in passes.columns:
+    if passes is None or passes.empty:
         ax.text(
-            60, 40, "Sem xP Threat Passes",
+            60, 40, "Sem passes para este filtro",
             ha="center", va="center", color="white", fontsize=10,
         )
         ax.set_title(
-            f"{player_name}\nxP Threat Passes · {distance_label} · {season_label}",
+            f"{player_name}\n{category_label} · {season_label}",
             color="white", fontsize=10, pad=8,
         )
         return fig
 
     work = passes.copy()
-    values = work[xp_col].to_numpy(dtype=float)
-    vmax = max(float(np.max(values)), 0.05)
-    norm = Normalize(vmin=0.0, vmax=min(vmax, XP_PASS_MAX))
+    color_by_xp = xp_col is not None and xp_col in work.columns
+    if color_by_xp:
+        values = work[xp_col].to_numpy(dtype=float)
+        vmax = max(float(np.max(values)), 0.05)
+        norm = Normalize(vmin=0.0, vmax=min(vmax, XP_PASS_MAX))
+    else:
+        norm = None
 
     for row in work.itertuples(index=False):
-        xp_value = float(getattr(row, xp_col))
-        color = CMAP_XP(norm(xp_value))
-        lw_scale = 0.85 + 0.35 * min(xp_value / XP_PASS_MAX, 1.0)
+        if color_by_xp:
+            xp_value = float(getattr(row, xp_col))
+            color = CMAP_XP(norm(xp_value))
+            lw_scale = 0.85 + 0.35 * min(xp_value / XP_PASS_MAX, 1.0)
+        else:
+            color = "#60a5fa"
+            lw_scale = 1.0
+        is_threat = bool(getattr(row, threat_col, False)) if threat_col in work.columns else False
+        alpha = 0.98 if is_threat else 0.78
+        if is_threat:
+            lw_scale += 0.15
         _delicate_arrows(
             pitch, ax,
             row.x_start, row.y_start, row.x_end, row.y_end,
-            color, alpha=0.92, lw_scale=lw_scale,
+            color, alpha=alpha, lw_scale=lw_scale,
         )
         pitch.scatter(
             row.x_start, row.y_start,
@@ -221,14 +234,16 @@ def draw_xp_threat_passes_season_map(
             s=36, marker="s", color=color, edgecolors="white", linewidths=0.5, ax=ax, zorder=6,
         )
 
-    sm = ScalarMappable(norm=norm, cmap=CMAP_XP)
-    sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.02)
-    cbar.set_label("xP do passe", color="white", fontsize=8)
-    cbar.ax.yaxis.set_tick_params(color="white", labelcolor="white")
+    if color_by_xp:
+        sm = ScalarMappable(norm=norm, cmap=CMAP_XP)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.02)
+        cbar.set_label("xP do passe", color="white", fontsize=8)
+        cbar.ax.yaxis.set_tick_params(color="white", labelcolor="white")
 
     legend_handles = [
-        Line2D([0], [0], color=CMAP_XP(0.9), lw=2.0, label="xP Threat Pass"),
+        Line2D([0], [0], color=CMAP_XP(0.9) if color_by_xp else "#60a5fa", lw=2.0, label="Passe"),
+        Line2D([0], [0], color=CMAP_XP(0.95) if color_by_xp else "#fbbf24", lw=2.8, label="Threat pass"),
         Line2D([0], [0], marker="o", color="w", markerfacecolor="#94a3b8", markersize=5, linestyle="None", label="Origem"),
         Line2D([0], [0], marker="s", color="w", markerfacecolor="#94a3b8", markersize=5, linestyle="None", label="Destino"),
     ]
@@ -245,7 +260,25 @@ def draw_xp_threat_passes_season_map(
         text.set_color("white")
 
     ax.set_title(
-        f"{player_name}\n{len(work)} xP Threat Passes · {distance_label} · {season_label}",
+        f"{player_name}\n{len(work)} passes · {category_label} · {season_label}",
         color="white", fontsize=10, pad=8,
     )
     return fig
+
+
+def draw_xp_threat_passes_season_map(
+    passes,
+    *,
+    player_name: str,
+    season_label: str = "temporada",
+    distance_label: str = "todas as distâncias",
+    xp_col: str = "xp_m4",
+):
+    """Backward-compatible alias for threat-only season maps."""
+    return draw_special_passes_season_map(
+        passes,
+        player_name=player_name,
+        season_label=season_label,
+        category_label=distance_label,
+        xp_col=xp_col,
+    )

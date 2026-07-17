@@ -99,6 +99,79 @@ def _is_long_pass(scored: pd.DataFrame, dist: np.ndarray) -> np.ndarray:
     return dist > DISTANCE_MEDIUM_MAX_M
 
 
+SPECIAL_PASS_MAP_FILTERS: tuple[tuple[str, str], ...] = (
+    ("diagonal_long", "Diagonal Longa"),
+    ("line_break", "Quebra linha"),
+    ("inversion", "Inversões"),
+    ("cross", "Cruzamento"),
+    ("from_deep", "xP from deep"),
+    ("final_third", "% xP no terço final"),
+    ("in_box", "% xP na área"),
+)
+SPECIAL_PASS_MAP_FILTER_KEYS: tuple[str, ...] = tuple(key for key, _label in SPECIAL_PASS_MAP_FILTERS)
+SPECIAL_PASS_MAP_FILTER_LABELS: dict[str, str] = dict(SPECIAL_PASS_MAP_FILTERS)
+
+
+def _completed_pass_frame(passes: pd.DataFrame) -> pd.DataFrame:
+    if passes is None or passes.empty:
+        return pd.DataFrame()
+    mask = passes["is_won"] & passes["has_end"] if "is_won" in passes.columns else passes["has_end"]
+    return passes[mask].copy()
+
+
+def compute_special_pass_masks(scored: pd.DataFrame) -> dict[str, np.ndarray]:
+    """Boolean masks for each special-pass category on completed passes."""
+    n = len(scored)
+    empty = np.zeros(n, dtype=bool)
+    if scored is None or scored.empty:
+        return {key: empty.copy() for key in SPECIAL_PASS_MAP_FILTER_KEYS}
+
+    x_start = scored["x_start"].to_numpy(dtype=float)
+    y_start = scored["y_start"].to_numpy(dtype=float)
+    x_end = scored["x_end"].to_numpy(dtype=float)
+    y_end = scored["y_end"].to_numpy(dtype=float)
+    dist = scored["pass_distance"].to_numpy(dtype=float)
+    dx = x_end - x_start
+    dy = y_end - y_start
+
+    start_zone = _zone_x(x_start)
+    long_pass = _is_long_pass(scored, dist)
+    lateral_start = _is_lateral_corridor(y_start)
+    lateral_end = _is_lateral_corridor(y_end)
+    in_box = _in_penalty_box(x_end, y_end)
+
+    return {
+        "diagonal_long": (
+            (x_start <= DEF_X_MAX)
+            & lateral_end
+            & (x_end >= FINAL_X_MIN)
+            & long_pass
+        ),
+        "line_break": _is_forward_angle(dx, dy, max_angle_deg=LINE_BREAK_FORWARD_ANGLE_DEG),
+        "inversion": long_pass & _is_left_right_inversion(y_start, y_end),
+        "cross": lateral_start & (x_start >= FINAL_X_MIN) & in_box,
+        "from_deep": start_zone == "def",
+        "final_third": start_zone == "att",
+        "in_box": in_box,
+    }
+
+
+def filter_passes_by_special_type(passes: pd.DataFrame, filter_key: str) -> pd.DataFrame:
+    """Return completed passes matching a special-pass map filter."""
+    work = _completed_pass_frame(passes)
+    if work.empty:
+        return work
+    key = str(filter_key or "").strip()
+    if key not in SPECIAL_PASS_MAP_FILTER_KEYS:
+        return work.iloc[0:0].copy()
+    masks = compute_special_pass_masks(work)
+    return work.loc[masks[key]].copy()
+
+
+def special_pass_map_label(filter_key: str) -> str:
+    return SPECIAL_PASS_MAP_FILTER_LABELS.get(str(filter_key), str(filter_key))
+
+
 def _sum_xp(mask: np.ndarray, xp: np.ndarray) -> float:
     if not mask.any():
         return 0.0
@@ -126,41 +199,19 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
     )
     if "progress_ratio" not in scored.columns:
         scored["progress_ratio"] = xse._progress_ratio_series(scored)
-    x_start = scored["x_start"].to_numpy(dtype=float)
-    y_start = scored["y_start"].to_numpy(dtype=float)
-    x_end = scored["x_end"].to_numpy(dtype=float)
-    y_end = scored["y_end"].to_numpy(dtype=float)
-    dist = scored["pass_distance"].to_numpy(dtype=float)
-    dx = x_end - x_start
-    dy = y_end - y_start
 
-    start_zone = _zone_x(x_start)
     xp_total = float(xp.sum())
-
-    long_pass = _is_long_pass(scored, dist)
-    lateral_start = _is_lateral_corridor(y_start)
-    lateral_end = _is_lateral_corridor(y_end)
-
-    diagonal_long = (
-        (x_start <= DEF_X_MAX)
-        & lateral_end
-        & (x_end >= FINAL_X_MIN)
-        & long_pass
-    )
-    line_break = _is_forward_angle(dx, dy, max_angle_deg=LINE_BREAK_FORWARD_ANGLE_DEG)
-    inversion = long_pass & _is_left_right_inversion(y_start, y_end)
-    cross = lateral_start & (x_start >= FINAL_X_MIN) & _in_penalty_box(x_end, y_end)
-    in_box = _in_penalty_box(x_end, y_end)
+    masks = compute_special_pass_masks(scored)
 
     out: dict[str, float | int] = dict(base)
     out.update({
-        "xp_diagonal_long_total": _sum_xp(diagonal_long, xp),
-        "xp_line_break_total": _sum_xp(line_break, xp),
-        "xp_inversion_total": _sum_xp(inversion, xp),
-        "xp_cross_total": _sum_xp(cross, xp),
-        "xp_final_third_share": _sum_xp(start_zone == "att", xp) / xp_total if xp_total > 0 else 0.0,
-        "xp_box_share": _sum_xp(in_box, xp) / xp_total if xp_total > 0 else 0.0,
-        "xp_from_deep": _sum_xp(start_zone == "def", xp),
+        "xp_diagonal_long_total": _sum_xp(masks["diagonal_long"], xp),
+        "xp_line_break_total": _sum_xp(masks["line_break"], xp),
+        "xp_inversion_total": _sum_xp(masks["inversion"], xp),
+        "xp_cross_total": _sum_xp(masks["cross"], xp),
+        "xp_final_third_share": _sum_xp(masks["final_third"], xp) / xp_total if xp_total > 0 else 0.0,
+        "xp_box_share": _sum_xp(masks["in_box"], xp) / xp_total if xp_total > 0 else 0.0,
+        "xp_from_deep": _sum_xp(masks["from_deep"], xp),
         "xp_max_pass": float(xp.max()) if n else 0.0,
         "xp_pass_std": float(xp.std()) if n > 1 else 0.0,
         "xp_pass_cv": float(xp.std() / xp.mean()) if n > 1 and xp.mean() > 0 else 0.0,
