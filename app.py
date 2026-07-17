@@ -5874,25 +5874,26 @@ def build_xp_per_pass_total_scatter_figure(
         showlegend=False,
         hovermode="closest",
         xaxis=dict(
-            title="xP/Passe",
+            title=dict(text="xP/Passe", font=dict(size=10, color="#94a3b8")),
             color="#94a3b8",
             showgrid=False,
             zeroline=False,
             linecolor="#334155",
-            tickfont=dict(size=10),
-            titlefont=dict(size=10),
+            tickfont=dict(size=10, color="#94a3b8"),
         ),
         yaxis=dict(
-            title="xP Total",
+            title=dict(text="xP Total", font=dict(size=10, color="#94a3b8")),
             color="#94a3b8",
             showgrid=False,
             zeroline=False,
             linecolor="#334155",
-            tickfont=dict(size=10),
-            titlefont=dict(size=10),
+            tickfont=dict(size=10, color="#94a3b8"),
         ),
     )
     return fig
+
+
+draw_xp_per_pass_total_scatter = build_xp_per_pass_total_scatter_figure
 
 
 def _selected_position_blocks_label(state_key: str) -> str:
