@@ -5677,46 +5677,6 @@ def _xp_stats_metric_ranks_dict(profile: dict, keys: tuple[str, ...]) -> dict:
     return ranks
 
 
-def _metric_grade_score(grade: str | None) -> float | None:
-    if not grade:
-        return None
-    mapping = {
-        "Good": 9.0,
-        "Above Average": 7.5,
-        "Average": 6.0,
-        "Under Average": 4.5,
-        "Poor": 3.0,
-    }
-    return mapping.get(grade)
-
-
-def _metric_grade_pill_html(grade: str | None) -> str:
-    if not grade:
-        return '<span class="stats-grade-pill" style="background:#334155;color:#f8fafc">—</span>'
-    score = _metric_grade_score(grade)
-    bg = score_display_color(score) if score is not None else "#334155"
-    txt = _badge_text_color(bg)
-    return (
-        f'<span class="stats-grade-pill" style="background:{bg};color:{txt}">'
-        f"{html.escape(grade)}</span>"
-    )
-
-
-def _stats_pair_eval_summary_html(profile: dict, per_pass_key: str, rate_key: str) -> str:
-    per_grade = xstats.metric_qualitative_grade(profile, per_pass_key)
-    rate_grade = xstats.metric_qualitative_grade(profile, rate_key)
-    rate_pct = xstats.format_threat_rate_display(profile.get(rate_key))
-    return (
-        '<span class="stats-title-eval">'
-        '<span class="stats-title-eval-label">xP/Passe</span>'
-        f"{_metric_grade_pill_html(per_grade)}"
-        '<span class="stats-title-eval-label">% Threat</span>'
-        f'<span class="stats-title-eval-pct">{html.escape(rate_pct)}</span>'
-        f"{_metric_grade_pill_html(rate_grade)}"
-        "</span>"
-    )
-
-
 def _stats_metric_line_html(profile: dict, key: str, metric_ranks: dict) -> str:
     return _metric_line_html(
         xstats.stats_metric_label(key),
@@ -5730,18 +5690,10 @@ def _stats_metric_line_html(profile: dict, key: str, metric_ranks: dict) -> str:
     )
 
 
-def _stats_section_summary_html(
-    profile: dict,
-    section_title: str,
-    summary_keys: tuple[str, str] | None,
-) -> str:
-    eval_html = ""
-    if summary_keys:
-        eval_html = _stats_pair_eval_summary_html(profile, summary_keys[0], summary_keys[1])
+def _stats_section_summary_html(section_title: str) -> str:
     title_row = (
         f'<div class="grade-card-title-row">'
         f'<div class="grade-card-title">{html.escape(section_title)}</div>'
-        f"{eval_html}"
         f"</div>"
     )
     return (
@@ -5757,7 +5709,6 @@ def _stats_section_accordion_html(
     profile: dict,
     section_title: str,
     keys: tuple[str, ...],
-    summary_keys: tuple[str, str] | None,
 ) -> str:
     metric_ranks = _xp_stats_metric_ranks_dict(profile, keys)
     lines = "".join(_stats_metric_line_html(profile, key, metric_ranks) for key in keys)
@@ -5765,32 +5716,31 @@ def _stats_section_accordion_html(
         '<details class="grade-accordion" name="stats-sections">'
         "<summary>"
         '<i class="fa-solid fa-chevron-right grade-arrow" aria-hidden="true"></i>'
-        f"{_stats_section_summary_html(profile, section_title, summary_keys)}"
+        f"{_stats_section_summary_html(section_title)}"
         "</summary>"
         f'<div class="grade-accordion-body">{lines}</div>'
         "</details>"
     )
 
 
-def _iter_stats_sections() -> list[tuple[str, tuple[str, ...], tuple[str, str] | None]]:
-    """Normalize XP_STATS_SECTIONS to (title, keys, summary_keys) triples."""
+def _iter_stats_sections() -> list[tuple[str, tuple[str, ...]]]:
     if hasattr(xstats, "iter_xp_stats_sections"):
         return list(xstats.iter_xp_stats_sections())
-    out: list[tuple[str, tuple[str, ...], tuple[str, str] | None]] = []
+    out: list[tuple[str, tuple[str, ...]]] = []
     for entry in xstats.XP_STATS_SECTIONS:
         if len(entry) == 2:
             title, keys = entry
-            out.append((title, keys, None))
+            out.append((title, keys))
         else:
-            title, keys, summary_keys = entry
-            out.append((title, keys, summary_keys))
+            title, keys, _summary = entry
+            out.append((title, keys))
     return out
 
 
 def _build_stats_panel_html(profile: dict) -> str:
     parts: list[str] = ['<div class="stats-panel">']
-    for section_title, keys, summary_keys in _iter_stats_sections():
-        parts.append(_stats_section_accordion_html(profile, section_title, keys, summary_keys))
+    for section_title, keys in _iter_stats_sections():
+        parts.append(_stats_section_accordion_html(profile, section_title, keys))
     parts.append("</div>")
     return "".join(parts)
 
@@ -5831,8 +5781,7 @@ def render_stats_section(
         f'{html.escape(str(profile.get("position", "—")))} · {html.escape(group_label)} · '
         f"Barras = posição no grupo · Curto &lt;{xstats.DISTANCE_SHORT_MAX_M:.0f} m · "
         f"Médio {xstats.DISTANCE_SHORT_MAX_M:.0f}–{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
-        f"Longo &gt;{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
-        f"título = grade de xP/Passe e % Threat (valor em xx.x%)</p>",
+        f"Longo &gt;{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m</p>",
         unsafe_allow_html=True,
     )
     st.html(_build_stats_panel_html(profile), width="stretch")
