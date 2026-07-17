@@ -5664,7 +5664,9 @@ def render_stats_section(
         f'<p class="stats-player-head">{html.escape(str(profile.get("player_name", "—")))}</p>'
         f'<p class="stats-player-meta">{html.escape(str(profile.get("team", "—")))} · '
         f'{html.escape(str(profile.get("position", "—")))} · {html.escape(group_label)} · '
-        f"Barras = posição no grupo</p>",
+        f"Barras = posição no grupo · Curto &lt;{xstats.DISTANCE_SHORT_MAX_M:.0f} m · "
+        f"Médio {xstats.DISTANCE_SHORT_MAX_M:.0f}–{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
+        f'Longo ≥{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m</p>',
         unsafe_allow_html=True,
     )
     st.html(_build_stats_panel_html(profile), width="stretch")

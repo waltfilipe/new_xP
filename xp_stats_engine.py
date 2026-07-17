@@ -20,7 +20,10 @@ PENALTY_Y_MAX = pe.PENALTY_BOX_Y_MAX
 XP_COL = "xp_m4"
 THREAT_COL = "is_threat_m4"
 RESIDUAL_COL = "xp_residual"
-BANDS = ("short", "medium", "long")
+DISTANCE_BAND_LABELS = xse.DISTANCE_BAND_LABELS
+DISTANCE_SHORT_MAX_M = pe.DISTANCE_SHORT_MAX_M
+DISTANCE_MEDIUM_MAX_M = pe.DISTANCE_MEDIUM_MAX_M
+BANDS = xse.DISTANCE_BAND_ORDER
 
 
 def _zone_x(x: np.ndarray) -> np.ndarray:
@@ -196,10 +199,26 @@ XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "xp_m4_total", "xp_per_90", "xp_m4_threat_passes_p90", "xp_m4_per_pass",
         "xp_m4_threat_rate", "passes_completed",
     )),
-    ("Por distância", (
-        "xp_m4_total_short", "xp_m4_threat_short_p90",
-        "xp_m4_total_medium", "xp_m4_threat_medium_p90",
-        "xp_m4_total_long", "xp_m4_threat_long_p90",
+    (f"Short ({DISTANCE_BAND_LABELS['short']})", (
+        "xp_dist_index_short",
+        "xp_m4_per_pass_short",
+        "xp_m4_threat_rate_short",
+        "xp_m4_threat_short_p90",
+        "passes_short",
+    )),
+    (f"Medium ({DISTANCE_BAND_LABELS['medium']})", (
+        "xp_dist_index_medium",
+        "xp_m4_per_pass_medium",
+        "xp_m4_threat_rate_medium",
+        "xp_m4_threat_medium_p90",
+        "passes_medium",
+    )),
+    (f"Long ({DISTANCE_BAND_LABELS['long']})", (
+        "xp_dist_index_long",
+        "xp_m4_per_pass_long",
+        "xp_m4_threat_rate_long",
+        "xp_m4_threat_long_p90",
+        "passes_long",
     )),
     ("Progressão e direção", (
         "xp_prog_total", "xp_static_total", "xp_prog_share",
@@ -239,6 +258,21 @@ XP_STATS_LABELS: dict[str, str] = {
     "xp_m4_per_pass": "xP/Passe",
     "xp_m4_threat_rate": "% Threat Passes",
     "passes_completed": "Passes completados",
+    "xp_dist_index_short": "Distance Index",
+    "xp_dist_index_medium": "Distance Index",
+    "xp_dist_index_long": "Distance Index",
+    "xp_m4_per_pass_short": "xP/Passe",
+    "xp_m4_per_pass_medium": "xP/Passe",
+    "xp_m4_per_pass_long": "xP/Passe",
+    "xp_m4_threat_rate_short": "% Threat Passes",
+    "xp_m4_threat_rate_medium": "% Threat Passes",
+    "xp_m4_threat_rate_long": "% Threat Passes",
+    "xp_m4_threat_short_p90": "xP Threat Passes (Per game)",
+    "xp_m4_threat_medium_p90": "xP Threat Passes (Per game)",
+    "xp_m4_threat_long_p90": "xP Threat Passes (Per game)",
+    "passes_short": "Passes na faixa",
+    "passes_medium": "Passes na faixa",
+    "passes_long": "Passes na faixa",
     "xp_m4_total_short": "xP Total (Short)",
     "xp_m4_threat_short_p90": "Threat p/game (Short)",
     "xp_m4_total_medium": "xP Total (Medium)",
@@ -331,6 +365,28 @@ def attach_composite_indices(players: list[dict]) -> None:
             row["xp_builder_score"] = float(z_deep.iloc[i] + z_short_prog.iloc[i])
 
 
+def attach_distance_indices(players: list[dict]) -> None:
+    """Within-position z-score index per distance band (quality + threat rate + threat p90)."""
+    if not players:
+        return
+    pools: dict[str, list[dict]] = {}
+    for player in players:
+        group = str(player.get("position_group") or "CM")
+        pools.setdefault(group, []).append(player)
+
+    for rows in pools.values():
+        df = pd.DataFrame(rows)
+        for band in BANDS:
+            per_pass_col = f"xp_m4_per_pass_{band}"
+            rate_col = f"xp_m4_threat_rate_{band}"
+            p90_col = f"xp_m4_threat_{band}_p90"
+            z_per = _zscore(df.get(per_pass_col, pd.Series(0.0, index=df.index)).astype(float))
+            z_rate = _zscore(df.get(rate_col, pd.Series(0.0, index=df.index)).astype(float))
+            z_p90 = _zscore(df.get(p90_col, pd.Series(0.0, index=df.index)).astype(float))
+            for i, row in enumerate(rows):
+                row[f"xp_dist_index_{band}"] = float(z_per.iloc[i] + z_rate.iloc[i] + z_p90.iloc[i])
+
+
 def attach_all_stats_ranks(players: list[dict]) -> None:
     """Rank every stats-tab metric within position group."""
     pools: dict[str, list[dict]] = {}
@@ -356,10 +412,16 @@ def format_stats_value(key: str, value: float | int | None) -> str:
     val = float(value)
     if key == "passes_completed":
         return f"{int(val):,}"
+    if key.startswith("passes_"):
+        return f"{int(val):,}"
+    if key.startswith("xp_dist_index_"):
+        return f"{val:.2f}"
     if key.endswith("_rate") or key.endswith("_share") or key.endswith("_pct") or key == "xp_surprise_rate" or key == "xp_threat_conversion":
-        if key == "xp_m4_threat_rate":
+        if key == "xp_m4_threat_rate" or key.startswith("xp_m4_threat_rate_"):
             return f"{100 * val:.1f}%"
         return f"{100 * val:.1f}%"
+    if key.startswith("xp_m4_per_pass_"):
+        return f"{val:.3f}"
     if key.startswith("xp_threat_index") or key.endswith("_index") or key.endswith("_score"):
         return f"{val:.2f}"
     if key == "xp_m4_per_pass" or key == "xp_prog_efficiency" or key == "xp_zone_lift_att_def":

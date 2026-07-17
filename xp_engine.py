@@ -16,7 +16,7 @@ from sklearn.pipeline import Pipeline
 import passes_engine as pe
 import xp_study_engine as xse
 
-XP_DATA_CACHE_VERSION = 7
+XP_DATA_CACHE_VERSION = 8
 XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total",
     "xp_m4_per_pass",
@@ -416,9 +416,15 @@ def compute_player_xp_metrics(grp: pd.DataFrame) -> dict[str, float | int]:
     }
     for band in BANDS:
         sub = scored[scored["distance_band"] == band]
-        out[f"xp_m4_threat_{band}"] = int(sub[THREAT_COL].sum()) if THREAT_COL in sub.columns and len(sub) else 0
-        out[f"xp_m4_mean_{band}"] = float(sub[XP_COL].mean()) if len(sub) else 0.0
-        out[f"xp_m4_total_{band}"] = float(sub[XP_COL].sum()) if len(sub) else 0.0
+        n_band = len(sub)
+        out[f"passes_{band}"] = int(n_band)
+        out[f"xp_m4_threat_{band}"] = int(sub[THREAT_COL].sum()) if THREAT_COL in sub.columns and n_band else 0
+        out[f"xp_m4_mean_{band}"] = float(sub[XP_COL].mean()) if n_band else 0.0
+        out[f"xp_m4_per_pass_{band}"] = float(sub[XP_COL].mean()) if n_band else 0.0
+        out[f"xp_m4_total_{band}"] = float(sub[XP_COL].sum()) if n_band else 0.0
+        out[f"xp_m4_threat_rate_{band}"] = (
+            float(sub[THREAT_COL].mean()) if THREAT_COL in sub.columns and n_band else 0.0
+        )
     return out
 
 
@@ -466,6 +472,7 @@ def build_xp_analytics(
     for i, p in enumerate(players, start=1):
         p["xp_m4_rank"] = i
     xstats.attach_composite_indices(players)
+    xstats.attach_distance_indices(players)
     xstats.attach_all_stats_ranks(players)
     attach_xp_metric_ranks(players)
     return registry, players
