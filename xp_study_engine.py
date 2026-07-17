@@ -54,8 +54,8 @@ THREAT_XP_THRESHOLDS: dict[str, float] = {
 
 DISTANCE_BAND_ORDER: tuple[str, ...] = ("short", "medium", "long")
 DISTANCE_BAND_LABELS: dict[str, str] = {
-    "short": "<12 m",
-    "medium": "12–25 m",
+    "short": "<15 m",
+    "medium": "15–25 m",
     "long": ">25 m",
 }
 
@@ -657,7 +657,7 @@ def _distance_band_series(distances: pd.Series | np.ndarray) -> pd.Series:
     dist = np.asarray(distances, dtype=float)
     bands = np.full(len(dist), "medium", dtype=object)
     bands[dist < pe.DISTANCE_SHORT_MAX_M] = "short"
-    bands[dist >= pe.DISTANCE_MEDIUM_MAX_M] = "long"
+    bands[dist > pe.DISTANCE_MEDIUM_MAX_M] = "long"
     return pd.Series(bands, index=getattr(distances, "index", None))
 
 

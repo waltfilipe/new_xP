@@ -5251,7 +5251,7 @@ def _resolve_progression_analysis_player(
 
 
 def _filter_maps_passes_by_distance(passes, *, short_only: bool):
-    """Keep only passes under the dashboard short-distance band (<12 m)."""
+    """Keep only passes under the dashboard short-distance band (<15 m)."""
     if not short_only or passes is None or passes.empty:
         return passes
     if "pass_distance" not in passes.columns:
@@ -5666,7 +5666,7 @@ def render_stats_section(
         f'{html.escape(str(profile.get("position", "—")))} · {html.escape(group_label)} · '
         f"Barras = posição no grupo · Curto &lt;{xstats.DISTANCE_SHORT_MAX_M:.0f} m · "
         f"Médio {xstats.DISTANCE_SHORT_MAX_M:.0f}–{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
-        f'Longo ≥{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m</p>',
+        f'Longo &gt;{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m</p>',
         unsafe_allow_html=True,
     )
     st.html(_build_stats_panel_html(profile), width="stretch")

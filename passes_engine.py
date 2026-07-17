@@ -95,7 +95,7 @@ WYSCOUT_PITCH_SIZE = 100.0
 PASS_BUILDUP_FIELD_SHARE = 0.8
 PASS_AGGRESSION_X_MIN = FIELD_X * PASS_BUILDUP_FIELD_SHARE
 LONG_PASS_MIN_DISTANCE_M = 30.0
-DISTANCE_SHORT_MAX_M = 12.0
+DISTANCE_SHORT_MAX_M = 15.0
 DISTANCE_MEDIUM_MAX_M = 25.0
 KICKOFF_RESTART_RADIUS_M = 4.0
 CORNER_CROSS_RADIUS_M = 10.0
@@ -1194,9 +1194,9 @@ def _distance_band_mask(passes: pd.DataFrame, band: str) -> pd.Series:
     if band == "short":
         return has_end & (dist < DISTANCE_SHORT_MAX_M)
     if band == "medium":
-        return has_end & (dist >= DISTANCE_SHORT_MAX_M) & (dist < DISTANCE_MEDIUM_MAX_M)
+        return has_end & (dist >= DISTANCE_SHORT_MAX_M) & (dist <= DISTANCE_MEDIUM_MAX_M)
     if band == "long":
-        return has_end & (dist >= DISTANCE_MEDIUM_MAX_M)
+        return has_end & (dist > DISTANCE_MEDIUM_MAX_M)
     return pd.Series(False, index=passes.index)
 
 
