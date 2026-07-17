@@ -4600,7 +4600,7 @@ def _xp_stat_display(profile: dict, key: str) -> str:
         return f"{float(profile.get(key, 0)):.3f}"
     if key.endswith("_p90"):
         return f"{float(profile.get(key, 0)):.2f}"
-    if key == "xp_m4_threat_rate":
+    if key == "xp_m4_threat_rate" or key.startswith("xp_m4_threat_rate_"):
         return f"{100 * float(profile.get(key, 0)):.1f}%"
     return "—"
 

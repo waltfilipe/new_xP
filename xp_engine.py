@@ -16,7 +16,7 @@ from sklearn.pipeline import Pipeline
 import passes_engine as pe
 import xp_study_engine as xse
 
-XP_DATA_CACHE_VERSION = 14
+XP_DATA_CACHE_VERSION = 15
 XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total",
     "xp_m4_per_pass",
@@ -471,7 +471,6 @@ def build_xp_analytics(
     players.sort(key=lambda p: float(p.get("xp_m4_total", 0.0)), reverse=True)
     for i, p in enumerate(players, start=1):
         p["xp_m4_rank"] = i
-    xstats.attach_composite_indices(players)
     xstats.attach_distance_indices(players)
     xstats.attach_all_stats_ranks(players)
     attach_xp_metric_ranks(players)

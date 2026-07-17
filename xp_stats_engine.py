@@ -10,9 +10,16 @@ import xp_study_engine as xse
 
 FIELD_X = pe.FIELD_X
 FIELD_Y = pe.FIELD_Y
-FINAL_THIRD_X = 80.0
-WIDE_Y_MAX = 20.0
-WIDE_Y_MIN = 60.0
+DEF_FIELD_SHARE = 0.40
+FINAL_FIELD_SHARE = 0.40
+DEF_X_MAX = FIELD_X * DEF_FIELD_SHARE
+FINAL_X_MIN = FIELD_X * (1.0 - FINAL_FIELD_SHARE)
+FIRST_THIRD_X = FIELD_X / 3.0
+CENTRAL_Y_MIN = 20.0
+CENTRAL_Y_MAX = 60.0
+LATERAL_INNER_SHARE = 0.30
+LINE_BREAK_DIST_MIN_M = 10.0
+LINE_BREAK_DIST_MAX_M = 20.0
 PENALTY_X_MIN = pe.PENALTY_BOX_X_MIN
 PENALTY_Y_MIN = pe.PENALTY_BOX_Y_MIN
 PENALTY_Y_MAX = pe.PENALTY_BOX_Y_MAX
@@ -53,25 +60,45 @@ DISTANCE_INDEX_VOLUME_GRADE_PENALTY_PCTS: tuple[tuple[float, int], ...] = (
 
 def _zone_x(x: np.ndarray) -> np.ndarray:
     out = np.full(len(x), "mid", dtype=object)
-    out[x <= 40] = "def"
-    out[x > 80] = "att"
+    out[x <= FIRST_THIRD_X] = "def"
+    out[x > FINAL_X_MIN] = "att"
     return out
+
+
+def _corridor_index(y: np.ndarray) -> np.ndarray:
+    out = np.full(len(y), "central", dtype=object)
+    out[y < CENTRAL_Y_MIN] = "left"
+    out[y > CENTRAL_Y_MAX] = "right"
+    return out
+
+
+def _is_lateral_corridor(y: np.ndarray) -> np.ndarray:
+    return (y < CENTRAL_Y_MIN) | (y > CENTRAL_Y_MAX)
+
+
+def _line_break_origin_corridor(y: np.ndarray) -> np.ndarray:
+    """Central corridor plus the inner 30% of each lateral band (adjacent to center)."""
+    left_inner = (y < CENTRAL_Y_MIN) & (y >= CENTRAL_Y_MIN * (1.0 - LATERAL_INNER_SHARE))
+    right_inner = (y > CENTRAL_Y_MAX) & (
+        y <= CENTRAL_Y_MAX + (FIELD_Y - CENTRAL_Y_MAX) * LATERAL_INNER_SHARE
+    )
+    return (y >= CENTRAL_Y_MIN) & (y <= CENTRAL_Y_MAX) | left_inner | right_inner
+
+
+def _in_penalty_box(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    return (x >= PENALTY_X_MIN) & (y >= PENALTY_Y_MIN) & (y <= PENALTY_Y_MAX)
+
+
+def _is_long_pass(scored: pd.DataFrame, dist: np.ndarray) -> np.ndarray:
+    if "distance_band" in scored.columns:
+        return scored["distance_band"].astype(str).to_numpy() == "long"
+    return dist > DISTANCE_MEDIUM_MAX_M
 
 
 def _sum_xp(mask: np.ndarray, xp: np.ndarray) -> float:
     if not mask.any():
         return 0.0
     return float(xp[mask].sum())
-
-
-def _mean_xp(mask: np.ndarray, xp: np.ndarray) -> float:
-    if not mask.any():
-        return 0.0
-    return float(xp[mask].mean())
-
-
-def _count_threats(mask: np.ndarray, threat: np.ndarray) -> int:
-    return int((mask & threat).sum())
 
 
 def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
@@ -95,7 +122,6 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
     )
     if "progress_ratio" not in scored.columns:
         scored["progress_ratio"] = xse._progress_ratio_series(scored)
-    pr = scored["progress_ratio"].to_numpy(dtype=float)
     x_start = scored["x_start"].to_numpy(dtype=float)
     y_start = scored["y_start"].to_numpy(dtype=float)
     x_end = scored["x_end"].to_numpy(dtype=float)
@@ -103,63 +129,43 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
     dist = scored["pass_distance"].to_numpy(dtype=float)
 
     start_zone = _zone_x(x_start)
-    end_zone = _zone_x(x_end)
-    wide = (y_start < WIDE_Y_MAX) | (y_start > WIDE_Y_MIN)
-    central = ~wide
-
-    prog = pr > 0
-    forward = pr > 0.15
-    static = pr <= 0
-
     xp_total = float(xp.sum())
-    xp_prog = _sum_xp(prog, xp)
-    progress_m = np.maximum(
-        scored["x_end"].to_numpy(dtype=float) - scored["x_start"].to_numpy(dtype=float),
-        0.0,
+
+    long_pass = _is_long_pass(scored, dist)
+    start_corridor = _corridor_index(y_start)
+    end_corridor = _corridor_index(y_end)
+    lateral_start = _is_lateral_corridor(y_start)
+    lateral_end = _is_lateral_corridor(y_end)
+
+    diagonal_long = (
+        (x_start <= DEF_X_MAX)
+        & lateral_end
+        & (x_end >= FINAL_X_MIN)
+        & long_pass
     )
+    line_break = (
+        _line_break_origin_corridor(y_start)
+        & (dist >= LINE_BREAK_DIST_MIN_M)
+        & (dist <= LINE_BREAK_DIST_MAX_M)
+        & (x_end > x_start)
+    )
+    inversion = long_pass & (start_corridor != end_corridor)
+    cross = lateral_start & (x_start >= FINAL_X_MIN) & _in_penalty_box(x_end, y_end)
+    in_box = _in_penalty_box(x_end, y_end)
 
     out: dict[str, float | int] = dict(base)
     out.update({
-        "xp_prog_total": xp_prog,
-        "xp_static_total": _sum_xp(static, xp),
-        "xp_prog_share": xp_prog / xp_total if xp_total > 0 else 0.0,
-        "xp_threat_forward": _count_threats(forward, threat),
-        "xp_prog_efficiency": xp_prog / progress_m.sum() if progress_m.sum() > 0 else 0.0,
-        "xp_total_def": _sum_xp(start_zone == "def", xp),
-        "xp_total_mid": _sum_xp(start_zone == "mid", xp),
-        "xp_total_att": _sum_xp(start_zone == "att", xp),
-        "xp_threat_def": _count_threats(start_zone == "def", threat),
-        "xp_threat_mid": _count_threats(start_zone == "mid", threat),
-        "xp_threat_att": _count_threats(start_zone == "att", threat),
+        "xp_diagonal_long_total": _sum_xp(diagonal_long, xp),
+        "xp_line_break_total": _sum_xp(line_break, xp),
+        "xp_inversion_total": _sum_xp(inversion, xp),
+        "xp_cross_total": _sum_xp(cross, xp),
         "xp_final_third_share": _sum_xp(start_zone == "att", xp) / xp_total if xp_total > 0 else 0.0,
+        "xp_box_share": _sum_xp(in_box, xp) / xp_total if xp_total > 0 else 0.0,
         "xp_from_deep": _sum_xp(start_zone == "def", xp),
-        "xp_zone_lift_att_def": (
-            _mean_xp(start_zone == "att", xp) - _mean_xp(start_zone == "def", xp)
-        ),
-        "xp_wide_total": _sum_xp(wide, xp),
-        "xp_central_total": _sum_xp(central, xp),
-        "xp_wide_share": _sum_xp(wide, xp) / xp_total if xp_total > 0 else 0.0,
-        "xp_switch_total": _sum_xp(wide & (scored["distance_band"].to_numpy() == "long"), xp),
-        "xp_line_break_total": _sum_xp((x_start < FINAL_THIRD_X) & (x_end > FINAL_THIRD_X), xp),
-        "xp_build_up": _sum_xp(start_zone == "def", xp),
-        "xp_finalization": _sum_xp(
-            (x_end >= PENALTY_X_MIN) & (y_end >= PENALTY_Y_MIN) & (y_end <= PENALTY_Y_MAX),
-            xp,
-        ),
         "xp_max_pass": float(xp.max()) if n else 0.0,
         "xp_pass_std": float(xp.std()) if n > 1 else 0.0,
         "xp_pass_cv": float(xp.std() / xp.mean()) if n > 1 and xp.mean() > 0 else 0.0,
     })
-
-    if "isHome" in scored.columns:
-        home = scored["isHome"].astype(bool).to_numpy()
-        out["xp_home_total"] = _sum_xp(home, xp)
-        out["xp_away_total"] = _sum_xp(~home, xp)
-        out["xp_home_share"] = out["xp_home_total"] / xp_total if xp_total > 0 else 0.0
-    else:
-        out["xp_home_total"] = 0.0
-        out["xp_away_total"] = 0.0
-        out["xp_home_share"] = 0.0
 
     if RESIDUAL_COL in scored.columns:
         residual = scored[RESIDUAL_COL].to_numpy(dtype=float)
@@ -201,8 +207,6 @@ def apply_per90_metrics(metrics: dict[str, float | int], minutes: float | None) 
     """Add per-90 variants in place."""
     if not minutes or float(minutes) <= 0:
         metrics["xp_per_90"] = 0.0
-        for key in ("def", "mid", "att"):
-            metrics[f"xp_threat_{key}_p90"] = 0.0
         return
     mins_f = float(minutes)
     factor = 90.0 / mins_f
@@ -212,10 +216,6 @@ def apply_per90_metrics(metrics: dict[str, float | int], minutes: float | None) 
     for band in BANDS:
         band_threats = int(metrics.get(f"xp_m4_threat_{band}", 0))
         metrics[f"xp_m4_threat_{band}_p90"] = float(band_threats) * factor
-    for key in ("def", "mid", "att"):
-        threats = int(metrics.get(f"xp_threat_{key}", 0))
-        metrics[f"xp_threat_{key}_p90"] = float(threats) * factor
-    metrics["xp_threat_forward_p90"] = float(metrics.get("xp_threat_forward", 0)) * factor
 
 
 # (section_title, metric_keys)
@@ -232,18 +232,14 @@ XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (f"Long ({DISTANCE_BAND_LABELS['long']})", (
         "xp_m4_per_pass_long", "xp_m4_threat_rate_long",
     )),
-    ("Progressão e direção", (
-        "xp_prog_total", "xp_static_total", "xp_prog_share",
-        "xp_threat_forward_p90", "xp_prog_efficiency",
-    )),
-    ("Por zona do campo", (
-        "xp_total_def", "xp_total_mid", "xp_total_att",
-        "xp_threat_def_p90", "xp_threat_mid_p90", "xp_threat_att_p90",
-        "xp_final_third_share", "xp_from_deep", "xp_zone_lift_att_def",
-    )),
-    ("Canais e rotas", (
-        "xp_wide_total", "xp_central_total", "xp_wide_share",
-        "xp_switch_total", "xp_line_break_total",
+    ("SPECIAL PASSES", (
+        "xp_diagonal_long_total",
+        "xp_line_break_total",
+        "xp_inversion_total",
+        "xp_cross_total",
+        "xp_final_third_share",
+        "xp_box_share",
+        "xp_from_deep",
     )),
     ("Qualidade e threat", (
         "xp_residual_positive", "xp_residual_negative", "xp_surprise_rate",
@@ -253,13 +249,6 @@ XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Consistência", (
         "xp_game_mean", "xp_game_std", "xp_pass_cv",
         "xp_games_above_median_pct", "xp_pass_std",
-    )),
-    ("Contexto", (
-        "xp_build_up", "xp_finalization",
-        "xp_home_total", "xp_away_total", "xp_home_share",
-    )),
-    ("Índices compostos", (
-        "xp_threat_index", "xp_progressive_index", "xp_creator_score", "xp_builder_score",
     )),
 )
 
@@ -314,25 +303,13 @@ XP_STATS_LABELS: dict[str, str] = {
     "xp_m4_threat_medium_p90": "Threat p/game (Medium)",
     "xp_m4_total_long": "xP Total (Long)",
     "xp_m4_threat_long_p90": "Threat p/game (Long)",
-    "xp_prog_total": "xP progressivo",
-    "xp_static_total": "xP estático/recuado",
-    "xp_prog_share": "% xP em progressão",
-    "xp_threat_forward_p90": "Threat forward p/game",
-    "xp_prog_efficiency": "Progress efficiency",
-    "xp_total_def": "xP terço defensivo",
-    "xp_total_mid": "xP terço médio",
-    "xp_total_att": "xP terço ofensivo",
-    "xp_threat_def_p90": "Threat p/game (Def)",
-    "xp_threat_mid_p90": "Threat p/game (Mid)",
-    "xp_threat_att_p90": "Threat p/game (Att)",
+    "xp_diagonal_long_total": "Diagonal Longa",
+    "xp_line_break_total": "Quebra linha",
+    "xp_inversion_total": "Inversões",
+    "xp_cross_total": "Cruzamento",
     "xp_final_third_share": "% xP no terço final",
+    "xp_box_share": "% xP na área",
     "xp_from_deep": "xP from deep",
-    "xp_zone_lift_att_def": "Zone lift (Att − Def)",
-    "xp_wide_total": "xP wide channels",
-    "xp_central_total": "xP central corridor",
-    "xp_wide_share": "% xP wide",
-    "xp_switch_total": "Switch xP (long wide)",
-    "xp_line_break_total": "Line-breaking xP",
     "xp_residual_positive": "xP acima do esperado",
     "xp_residual_negative": "xP abaixo do esperado",
     "xp_surprise_rate": "Surprise rate",
@@ -346,15 +323,6 @@ XP_STATS_LABELS: dict[str, str] = {
     "xp_pass_cv": "xP CV (passes)",
     "xp_games_above_median_pct": "% jogos acima da mediana",
     "xp_pass_std": "Desvio xP (passes)",
-    "xp_build_up": "xP in build-up",
-    "xp_finalization": "xP in finalization",
-    "xp_home_total": "xP em casa",
-    "xp_away_total": "xP fora",
-    "xp_home_share": "% xP em casa",
-    "xp_threat_index": "xP Threat Index",
-    "xp_progressive_index": "Progressive xP Index",
-    "xp_creator_score": "Creator score",
-    "xp_builder_score": "Builder score",
 }
 
 XP_STATS_RANK_METRICS: tuple[str, ...] = tuple(
@@ -602,15 +570,13 @@ def format_stats_value(key: str, value: float | int | None) -> str:
         if value is None:
             return "— (< P20)"
         return f"{val:.2f}"
+    if key.startswith("xp_m4_threat_rate"):
+        return f"{100 * val:.1f}%"
     if key.endswith("_rate") or key.endswith("_share") or key.endswith("_pct") or key == "xp_surprise_rate" or key == "xp_threat_conversion":
-        if key == "xp_m4_threat_rate" or key.startswith("xp_m4_threat_rate_"):
-            return f"{100 * val:.1f}%"
         return f"{100 * val:.1f}%"
     if key.startswith("xp_m4_per_pass_"):
         return f"{val:.3f}"
-    if key.startswith("xp_threat_index") or key.endswith("_index") or key.endswith("_score"):
-        return f"{val:.2f}"
-    if key == "xp_m4_per_pass" or key == "xp_prog_efficiency" or key == "xp_zone_lift_att_def":
+    if key == "xp_m4_per_pass":
         return f"{val:.3f}"
     if key.endswith("_p90") or key == "xp_per_90" or key == "xp_game_mean" or key == "xp_game_std":
         return f"{val:.2f}"
