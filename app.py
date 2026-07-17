@@ -5763,7 +5763,7 @@ def _xp_scatter_pool_players(
     return rows, thresholds
 
 
-def draw_xp_per_pass_total_scatter(
+def build_xp_per_pass_total_scatter_figure(
     players: list[dict],
     *,
     per_pass_key: str,
@@ -5772,11 +5772,9 @@ def draw_xp_per_pass_total_scatter(
     position_label: str,
     highlight_player_id: str | None = None,
 ):
-    import math
-    import matplotlib.pyplot as plt
+    import plotly.graph_objects as go
 
-    xs: list[float] = []
-    ys: list[float] = []
+    points: list[dict[str, object]] = []
     for row in players:
         try:
             x_val = float(row.get(per_pass_key))
@@ -5785,69 +5783,113 @@ def draw_xp_per_pass_total_scatter(
             continue
         if not (math.isfinite(x_val) and math.isfinite(y_val)):
             continue
-        xs.append(x_val)
-        ys.append(y_val)
+        points.append({
+            "x": x_val,
+            "y": y_val,
+            "name": str(row.get("player_name", "—")),
+            "team": str(row.get("team", "—")),
+            "position": str(row.get("position", "—")),
+            "player_id": str(row.get("player_id", "")),
+        })
 
-    fig, ax = plt.subplots(figsize=(8.4, 5.6), facecolor="#0f172a")
-    ax.set_facecolor("#0f172a")
+    fig = go.Figure()
+    mean_gold = "rgba(251, 191, 36, 0.34)"
 
-    if xs:
-        ax.scatter(
-            xs,
-            ys,
-            s=42,
-            c="#60a5fa",
-            alpha=0.78,
-            edgecolors="#1e3a5f",
-            linewidths=0.6,
-            zorder=2,
+    regular = [p for p in points if p["player_id"] != str(highlight_player_id or "")]
+    highlighted = [p for p in points if p["player_id"] == str(highlight_player_id or "")]
+
+    if regular:
+        fig.add_trace(
+            go.Scatter(
+                x=[p["x"] for p in regular],
+                y=[p["y"] for p in regular],
+                mode="markers",
+                name="Jogadores",
+                marker=dict(
+                    size=8,
+                    color="rgba(96, 165, 250, 0.84)",
+                    line=dict(width=0.8, color="#1e3a5f"),
+                ),
+                text=[p["name"] for p in regular],
+                customdata=[[p["team"], p["position"]] for p in regular],
+                hovertemplate=(
+                    "<b>%{text}</b><br>"
+                    "xP/Passe: %{x:.3f}<br>"
+                    "xP Total: %{y:.1f}<br>"
+                    "%{customdata[0]} · %{customdata[1]}"
+                    "<extra></extra>"
+                ),
+            )
         )
 
-    if highlight_player_id:
-        for row in players:
-            if str(row.get("player_id")) != str(highlight_player_id):
-                continue
-            try:
-                hx = float(row.get(per_pass_key))
-                hy = float(row.get(total_key))
-            except (TypeError, ValueError):
-                break
-            if not (math.isfinite(hx) and math.isfinite(hy)):
-                break
-            ax.scatter(
-                [hx],
-                [hy],
-                s=140,
-                c="#fbbf24",
-                edgecolors="#f8fafc",
-                linewidths=1.4,
-                zorder=5,
+    if highlighted:
+        fig.add_trace(
+            go.Scatter(
+                x=[p["x"] for p in highlighted],
+                y=[p["y"] for p in highlighted],
+                mode="markers",
+                name="Selecionado",
+                marker=dict(
+                    size=13,
+                    color="#fbbf24",
+                    line=dict(width=1.4, color="#f8fafc"),
+                ),
+                text=[p["name"] for p in highlighted],
+                customdata=[[p["team"], p["position"]] for p in highlighted],
+                hovertemplate=(
+                    "<b>%{text}</b><br>"
+                    "xP/Passe: %{x:.3f}<br>"
+                    "xP Total: %{y:.1f}<br>"
+                    "%{customdata[0]} · %{customdata[1]}"
+                    "<extra></extra>"
+                ),
             )
-            ax.annotate(
-                str(row.get("player_name", "—")),
-                (hx, hy),
-                xytext=(7, 7),
-                textcoords="offset points",
-                color="#f8fafc",
-                fontsize=8.5,
-                fontweight="bold",
-                zorder=6,
-            )
-            break
+        )
 
-    ax.set_xlabel("xP/Passe", color="#cbd5e1", fontsize=10)
-    ax.set_ylabel("xP Total", color="#cbd5e1", fontsize=10)
-    ax.set_title(
-        f"xP/Passe vs xP Total · {distance_label} · {position_label}",
-        color="#f8fafc",
-        fontsize=11,
-        pad=10,
+    if points:
+        mean_x = sum(float(p["x"]) for p in points) / len(points)
+        mean_y = sum(float(p["y"]) for p in points) / len(points)
+        fig.add_vline(x=mean_x, line_color=mean_gold, line_width=1.4)
+        fig.add_hline(y=mean_y, line_color=mean_gold, line_width=1.4)
+
+    fig.update_layout(
+        title=dict(
+            text=f"xP/Passe vs xP Total · {distance_label} · {position_label}",
+            font=dict(size=12, color="#f8fafc"),
+            x=0.02,
+            xanchor="left",
+        ),
+        height=320,
+        margin=dict(l=12, r=12, t=42, b=12),
+        paper_bgcolor="#0f172a",
+        plot_bgcolor="#0f172a",
+        font=dict(color="#cbd5e1", size=10),
+        hoverlabel=dict(
+            bgcolor="#111827",
+            bordercolor="#334155",
+            font=dict(color="#f8fafc", size=12),
+        ),
+        showlegend=False,
+        hovermode="closest",
+        xaxis=dict(
+            title="xP/Passe",
+            color="#94a3b8",
+            showgrid=False,
+            zeroline=False,
+            linecolor="#334155",
+            tickfont=dict(size=10),
+            titlefont=dict(size=10),
+        ),
+        yaxis=dict(
+            title="xP Total",
+            color="#94a3b8",
+            showgrid=False,
+            zeroline=False,
+            linecolor="#334155",
+            tickfont=dict(size=10),
+            titlefont=dict(size=10),
+        ),
     )
-    ax.tick_params(colors="#94a3b8")
-    for spine in ax.spines.values():
-        spine.set_color("#334155")
-    ax.grid(True, alpha=0.22, color="#475569", linestyle="--", linewidth=0.6)
-    fig.tight_layout()
     return fig
 
 
@@ -5916,7 +5958,7 @@ def _render_xp_scatter_panel(
     )
     st.pyplot(fig, clear_figure=True, use_container_width=True)
     min_passes_hint = ", ".join(
-        f"{html.escape(position_group_label(group))}: ≥{threshold:.0f}"
+        f"{position_group_label(group)}: ≥{threshold:.0f}"
         for group, threshold in sorted(thresholds.items())
         if any(str(row.get("position_group") or "CM") == group for row in pool)
     )
