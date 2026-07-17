@@ -1,18 +1,22 @@
 {
-  "version": "m4_od_8x6_12x8_threat_q10_progress_blend50_v1",
+  "version": "m4_od_12x8_b4_a2_pr0_blend40_pl_v1",
   "threat_quantile": 0.1,
+  "threat_progress_min": 0.0,
   "residual_thresholds": {
-    "short": 0.09803915990464067,
-    "medium": 0.09600334875083064,
-    "long": 0.13540109770692316
+    "short": 0.12985390467047647,
+    "medium": 0.12384374133922772,
+    "long": 0.1521707876330501
   },
   "residual_threshold_labels": {
-    "<12 m": 0.09803915990464067,
-    "12\u201325 m": 0.09600334875083064,
-    ">25 m": 0.13540109770692316
+    "<12 m": 0.12985390467047647,
+    "12\u201325 m": 0.12384374133922772,
+    ">25 m": 0.1521707876330501
   },
   "progress_floor_mult": 0.3,
   "progress_logistic_k": 2.2,
-  "league_passes": 212108,
-  "league_matches": 330
+  "blend_alpha": 0.4,
+  "grid": "12x8",
+  "team_surface": "season_b4",
+  "training_passes": 95128,
+  "training_matches": 156
 }

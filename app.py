@@ -5083,8 +5083,9 @@ def render_xp_season_rankings(xp_players: list[dict]) -> None:
     meta = xe.season_meta()
     st.markdown("### xP M4 — temporada Série B")
     st.caption(
-        f"Modelo 4 (origem 8×6 → destino 12×8) · Threat = top {int(xe.THREAT_QUANTILE * 100)}% "
-        f"do resíduo por faixa de distância · {meta.get('passes', '—'):,} passes · "
+        f"Modelo 4 (origem 12×8 → destino 12×8) · Superfície sazonal do time · "
+        f"Threat = top {int(xe.THREAT_QUANTILE * 100)}% do resíduo (progressão ≥ 0) · "
+        f"{meta.get('passes', '—'):,} passes · "
         f"{meta.get('threats', '—'):,} xP threat passes"
         if meta
         else "Modelo 4 com threat por quantil de resíduo."
@@ -5447,7 +5448,7 @@ def render_maps_section(
         )
         st.pyplot(fig, clear_figure=True, use_container_width=True)
         st.caption(
-            f"Threat = top {int(xe.THREAT_QUANTILE * 100)}% do resíduo xP por faixa de distância · "
+            f"Threat = top {int(xe.THREAT_QUANTILE * 100)}% do resíduo xP (progressão ≥ 0) · "
             f"{len(passes_df)} passes exibidos"
         )
     st.markdown("</div>", unsafe_allow_html=True)
@@ -5490,10 +5491,11 @@ def render_estudo_section() -> None:
     )
     st.caption(
         f"**Modelo 3:** suavização hierárquica por **destino 12×8** (partida + liga). "
-        f"**Modelo 4:** suavização por **origem 8×6 → destino 12×8**. "
+        f"**Modelo 4:** suavização por **origem 12×8 → destino 12×8**. "
         f"xP escalado em 0–{xp_max:.1f} (célula mais rara = {xp_max:.1f}; demais passes proporcionais). "
         f"Referência global: Série B ({meta.get('league_matches_serie_b', '—')}) + "
-        f"Série A ({meta.get('league_matches_serie_a', '—')}) = "
+        f"Série A ({meta.get('league_matches_serie_a', '—')}) + "
+        f"Premier League ({meta.get('league_matches_premier_league', '—')}) = "
         f"{meta.get('league_matches', '—')} partidas · "
         f"{meta.get('league_passes', 0):,} passes completos."
     )
@@ -5542,7 +5544,7 @@ def render_estudo_section() -> None:
                 f"- **Modelo 3:** raridade do **destino** (grade 12×8), com mistura "
                 f"`{alpha:.2f}·partida + {1-alpha:.2f}·média da liga`.\n"
                 f"- **Modelo 4:** raridade da **rota origem→destino** "
-                f"(origem 8×6, destino 12×8), mesma mistura partida/liga.\n"
+                f"(origem 12×8, destino 12×8), mesma mistura partida/liga.\n"
                 f"- **Escala xP:** a célula/rota mais rara vale **{xp_max:.1f}**; "
                 f"os demais passes são frações proporcionais (teto {xp_max:.1f} por passe)."
             )

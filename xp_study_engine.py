@@ -12,7 +12,7 @@ import passes_engine as pe
 
 STUDY_MATCH_EVENT_ID = 15526003
 XP_SMOOTHING = 1.0
-XP_BLEND_ALPHA = 0.5
+XP_BLEND_ALPHA = 0.4
 XP_PASS_MAX = 1.0
 
 FIELD_X = pe.FIELD_X
@@ -37,7 +37,7 @@ XP_MODEL_HIER_OD = "hierarchical_od"
 
 XP_MODEL_LABELS: dict[str, str] = {
     XP_MODEL_HIER_DEST: "3 — Suavização hierárquica (destino 12×8)",
-    XP_MODEL_HIER_OD: "4 — Suavização hierárquica (origem 8×6 → destino 12×8)",
+    XP_MODEL_HIER_OD: "4 — Suavização hierárquica (origem 12×8 → destino 12×8)",
 }
 
 XP_MODEL_COLUMNS: dict[str, str] = {
@@ -81,10 +81,10 @@ class GridConfig(NamedTuple):
 
 STUDY_GRID = GridConfig(
     12, 8,
-    8, 6,
+    12, 8,
     12, 8,
     "study_m3_m4",
-    "Estudo — destino 12×8 · origem OD 8×6",
+    "Estudo — tudo 12×8",
 )
 
 GRID_PRESETS: dict[str, GridConfig] = {
@@ -343,7 +343,7 @@ def build_team_xp_surfaces(
 
 @functools.lru_cache(maxsize=1)
 def _load_combined_league_pass_frame() -> pd.DataFrame:
-    """Serie B + Serie A pass events for the global xP reference pool."""
+    """Serie B + Serie A + Premier League pass events for the global xP reference pool."""
     frames: list[pd.DataFrame] = []
     serie_b = pe._load_season_pass_frame()
     if not serie_b.empty:
@@ -355,6 +355,11 @@ def _load_combined_league_pass_frame() -> pd.DataFrame:
         sa = serie_a.copy()
         sa["league_source"] = "serie_a"
         frames.append(sa)
+    premier_league = pe._load_pl_pass_frame()
+    if not premier_league.empty:
+        pl = premier_league.copy()
+        pl["league_source"] = "premier_league"
+        frames.append(pl)
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
@@ -411,10 +416,15 @@ def _league_reference_surfaces(
         matches_by_league = completed.groupby("league_source")["event_id"].nunique()
         num_matches_serie_b = int(matches_by_league.get("serie_b", 0))
         num_matches_serie_a = int(matches_by_league.get("serie_a", 0))
-        num_matches = max(num_matches_serie_b + num_matches_serie_a, 1)
+        num_matches_premier_league = int(matches_by_league.get("premier_league", 0))
+        num_matches = max(
+            num_matches_serie_b + num_matches_serie_a + num_matches_premier_league,
+            1,
+        )
     else:
         num_matches_serie_b = max(int(completed["event_id"].nunique()), 0)
         num_matches_serie_a = 0
+        num_matches_premier_league = 0
         num_matches = max(num_matches_serie_b, 1)
     dest_per_match = dest_count / num_matches
     od_per_match = od_count / num_matches
@@ -428,6 +438,7 @@ def _league_reference_surfaces(
         "num_matches": num_matches,
         "num_matches_serie_b": num_matches_serie_b,
         "num_matches_serie_a": num_matches_serie_a,
+        "num_matches_premier_league": num_matches_premier_league,
         "league_passes": int(len(completed)),
     }
 
@@ -443,6 +454,8 @@ def _assign_study_xp_models(
     count_grids_by_team: dict[str, np.ndarray],
     league: dict[str, np.ndarray | float | int],
     alpha: float = XP_BLEND_ALPHA,
+    team_season_od: dict[str, np.ndarray] | None = None,
+    team_n_matches: dict[str, int] | None = None,
 ) -> pd.DataFrame:
     out = passes.copy()
     for col in XP_MODEL_COLUMNS.values():
@@ -484,7 +497,13 @@ def _assign_study_xp_models(
     for team, count_grid in count_grids_by_team.items():
         blended_dest = _blend_count_grid(count_grid, league_dest_per_match, alpha=alpha)
         hier_dest_xp_by_team[team] = _counts_to_xp_grid(blended_dest)
-        team_od = _count_od_tensor(passes[passes["team"].astype(str) == team], grid)
+        team_key = str(team)
+        season_od = team_season_od.get(team_key) if team_season_od is not None else None
+        if season_od is not None:
+            n_matches = max(int((team_n_matches or {}).get(team_key, 1)), 1)
+            team_od = season_od / n_matches
+        else:
+            team_od = _count_od_tensor(passes[passes["team"].astype(str) == team_key], grid)
         blended_od = _blend_od_tensor(team_od, league_od_per_match, alpha=alpha)
         hier_od_lookup_by_team[team] = _od_counts_to_lookup(blended_od)
 
@@ -780,6 +799,7 @@ def load_study_match_bundle(
         "league_matches": int(league.get("num_matches", 0)),
         "league_matches_serie_b": int(league.get("num_matches_serie_b", 0)),
         "league_matches_serie_a": int(league.get("num_matches_serie_a", 0)),
+        "league_matches_premier_league": int(league.get("num_matches_premier_league", 0)),
         "league_passes": int(league.get("league_passes", 0)),
         "blend_alpha": XP_BLEND_ALPHA,
         "xp_pass_max": XP_PASS_MAX,
