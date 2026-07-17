@@ -5776,7 +5776,7 @@ def render_stats_section(
         f"Médio {xstats.DISTANCE_SHORT_MAX_M:.0f}–{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
         f"Longo &gt;{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
         f"Distance Index: elegível com passes na faixa ≥ P{xstats.DISTANCE_INDEX_MIN_PASS_PERCENTILE} da posição · "
-        f"grades Poor / Under Average / Average / Above Average / Good</p>",
+        f"grades balanceados (xP/Passe, % Threat, Threat p/game) com peso leve de volume</p>",
         unsafe_allow_html=True,
     )
     st.html(_build_stats_panel_html(profile), width="stretch")

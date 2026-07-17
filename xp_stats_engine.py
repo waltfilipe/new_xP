@@ -33,6 +33,22 @@ DISTANCE_INDEX_GRADES: tuple[tuple[str, float], ...] = (
     ("Under Average", 0.80),
     ("Poor", 1.00),
 )
+DISTANCE_INDEX_GRADE_ORDER: dict[str, int] = {
+    "Poor": 1,
+    "Under Average": 2,
+    "Average": 3,
+    "Above Average": 4,
+    "Good": 5,
+}
+# Skill metrics share the bulk of the index; volume enters with a small weight.
+DISTANCE_INDEX_SKILL_WEIGHT = 0.30
+DISTANCE_INDEX_VOLUME_WEIGHT = 0.10
+DISTANCE_INDEX_BALANCE_MIN_WEIGHT = 0.40
+DISTANCE_INDEX_BALANCE_MEAN_WEIGHT = 0.60
+DISTANCE_INDEX_VOLUME_GRADE_PENALTY_PCTS: tuple[tuple[float, int], ...] = (
+    (0.85, 2),
+    (0.70, 1),
+)
 
 
 def _zone_x(x: np.ndarray) -> np.ndarray:
@@ -347,6 +363,50 @@ def _zscore(series: pd.Series) -> pd.Series:
     return (series - series.mean()) / std
 
 
+def _rank_descending(values: pd.Series) -> pd.Series:
+    return values.astype(float).rank(method="min", ascending=False)
+
+
+def _grade_from_rank_pct(pct: float) -> str:
+    for label, cutoff in DISTANCE_INDEX_GRADES:
+        if pct <= cutoff:
+            return label
+    return DISTANCE_INDEX_GRADES[-1][0]
+
+
+def _grade_from_tier_value(value: float) -> str:
+    tier = max(1.0, min(5.0, float(value)))
+    if tier >= 4.5:
+        return "Good"
+    if tier >= 3.5:
+        return "Above Average"
+    if tier >= 2.5:
+        return "Average"
+    if tier >= 1.5:
+        return "Under Average"
+    return "Poor"
+
+
+def _balanced_grade_from_rank_pcts(rank_pcts: list[float]) -> str:
+    """Blend mean and worst metric so one outlier cannot inflate the grade."""
+    if not rank_pcts:
+        return "Poor"
+    tier_vals = [DISTANCE_INDEX_GRADE_ORDER[_grade_from_rank_pct(pct)] for pct in rank_pcts]
+    blended = (
+        DISTANCE_INDEX_BALANCE_MIN_WEIGHT * min(tier_vals)
+        + DISTANCE_INDEX_BALANCE_MEAN_WEIGHT * float(np.mean(tier_vals))
+    )
+    return _grade_from_tier_value(blended)
+
+
+def _apply_volume_grade_penalty(grade: str, volume_rank_pct: float) -> str:
+    tier = DISTANCE_INDEX_GRADE_ORDER.get(grade, 3)
+    for cutoff, steps in DISTANCE_INDEX_VOLUME_GRADE_PENALTY_PCTS:
+        if volume_rank_pct > cutoff:
+            tier -= steps
+    return _grade_from_tier_value(float(max(1, tier)))
+
+
 def attach_composite_indices(players: list[dict]) -> None:
     """Within-position z-score composites."""
     if not players:
@@ -375,13 +435,16 @@ def attach_composite_indices(players: list[dict]) -> None:
 
 
 def attach_distance_indices(players: list[dict]) -> None:
-    """Within-position z-score index per band; pool restricted to players at >= P20 passes."""
+    """Within-position index per band with balanced grades and light volume weight."""
     if not players:
         return
     pools: dict[str, list[dict]] = {}
     for player in players:
         group = str(player.get("position_group") or "CM")
         pools.setdefault(group, []).append(player)
+
+    skill_weight = DISTANCE_INDEX_SKILL_WEIGHT
+    volume_weight = DISTANCE_INDEX_VOLUME_WEIGHT
 
     for rows in pools.values():
         df = pd.DataFrame(rows)
@@ -399,34 +462,59 @@ def attach_distance_indices(players: list[dict]) -> None:
             for i, row in enumerate(rows):
                 row[f"xp_dist_index_{band}_min_passes"] = min_passes
                 row[f"xp_dist_index_{band}_eligible"] = bool(eligible.iloc[i])
+                row.pop(f"xp_dist_index_{band}_grade", None)
 
             if int(eligible.sum()) < 2:
                 for row in rows:
                     row[f"xp_dist_index_{band}"] = None
+                    row.pop(f"xp_dist_index_{band}_rank_in_group", None)
+                    row.pop(f"xp_dist_index_{band}_rank_pool_in_group", None)
                 continue
 
             sub = df.loc[eligible]
+            pool_size = int(len(sub))
             z_per = _zscore(sub[per_pass_col].astype(float))
             z_rate = _zscore(sub[rate_col].astype(float))
             z_p90 = _zscore(sub[p90_col].astype(float))
-            z_sum = z_per + z_rate + z_p90
+            z_vol = _zscore(np.log1p(sub[passes_col].astype(float)))
+            composite = (
+                skill_weight * z_per
+                + skill_weight * z_rate
+                + skill_weight * z_p90
+                + volume_weight * z_vol
+            )
+
+            rank_per = _rank_descending(sub[per_pass_col])
+            rank_rate = _rank_descending(sub[rate_col])
+            rank_p90 = _rank_descending(sub[p90_col])
+            rank_vol = _rank_descending(sub[passes_col])
 
             eligible_rows = [rows[i] for i in sub.index]
             ranked = sorted(
-                zip(eligible_rows, z_sum.tolist()),
+                zip(eligible_rows, composite.tolist(), sub.index.tolist()),
                 key=lambda item: float(item[1]),
                 reverse=True,
             )
-            for rank, (row, z_val) in enumerate(ranked, start=1):
+            for rank, (row, z_val, sub_idx) in enumerate(ranked, start=1):
                 row[f"xp_dist_index_{band}"] = float(z_val)
                 row[f"xp_dist_index_{band}_rank_in_group"] = rank
-                row[f"xp_dist_index_{band}_rank_pool_in_group"] = len(ranked)
+                row[f"xp_dist_index_{band}_rank_pool_in_group"] = pool_size
+
+                skill_pcts = [
+                    float(rank_per.loc[sub_idx]) / pool_size,
+                    float(rank_rate.loc[sub_idx]) / pool_size,
+                    float(rank_p90.loc[sub_idx]) / pool_size,
+                ]
+                grade = _balanced_grade_from_rank_pcts(skill_pcts)
+                vol_pct = float(rank_vol.loc[sub_idx]) / pool_size
+                row[f"xp_dist_index_{band}_grade"] = _apply_volume_grade_penalty(grade, vol_pct)
 
             for i, row in enumerate(rows):
                 if not eligible.iloc[i]:
                     row[f"xp_dist_index_{band}"] = None
                     row.pop(f"xp_dist_index_{band}_rank_in_group", None)
                     row.pop(f"xp_dist_index_{band}_rank_pool_in_group", None)
+                    row.pop(f"xp_dist_index_{band}_grade", None)
 
         for row in rows:
             band_vals = [
@@ -439,19 +527,18 @@ def attach_distance_indices(players: list[dict]) -> None:
 
 
 def distance_index_grade(rank: int | None, total: int | None) -> str | None:
-    """Map within-position rank (1 = best) to a qualitative distance-index label."""
+    """Legacy helper: map composite rank to a grade label."""
     if not rank or not total or rank <= 0 or total <= 0:
         return None
-    pct = float(rank) / float(total)
-    for label, cutoff in DISTANCE_INDEX_GRADES:
-        if pct <= cutoff:
-            return label
-    return DISTANCE_INDEX_GRADES[-1][0]
+    return _grade_from_rank_pct(float(rank) / float(total))
 
 
 def distance_index_grade_for_profile(profile: dict, band: str) -> str | None:
     if not profile.get(f"xp_dist_index_{band}_eligible", True):
         return None
+    stored = profile.get(f"xp_dist_index_{band}_grade")
+    if stored:
+        return str(stored)
     return distance_index_grade(
         profile.get(f"xp_dist_index_{band}_rank_in_group"),
         profile.get(f"xp_dist_index_{band}_rank_pool_in_group"),
