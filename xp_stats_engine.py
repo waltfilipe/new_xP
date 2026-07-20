@@ -24,6 +24,9 @@ LINE_BREAK_FIELD_MID_50_X = FIELD_X * 0.50
 LINE_BREAK_DIST_MIN_ATTACK_M = 10.0
 LINE_BREAK_DIST_MIN_MID_M = 15.0
 LINE_BREAK_DIST_MAX_M = 25.0
+CROSS_DIST_MIN_M = 15.0
+CROSS_LATERAL_DELTA_MIN_M = 8.0
+CROSS_MAX_START_X = 102.0
 PENALTY_X_MIN = pe.PENALTY_BOX_X_MIN
 PENALTY_Y_MIN = pe.PENALTY_BOX_Y_MIN
 PENALTY_Y_MAX = pe.PENALTY_BOX_Y_MAX
@@ -203,7 +206,14 @@ def compute_special_pass_masks(scored: pd.DataFrame) -> dict[str, np.ndarray]:
             & _is_forward_angle(dx, dy, max_angle_deg=LINE_BREAK_FORWARD_ANGLE_DEG)
         ),
         "inversion": long_pass & _is_left_right_inversion(y_start, y_end),
-        "cross": lateral_start & (x_start >= FINAL_X_MIN) & in_box,
+        "cross": (
+            lateral_start
+            & (x_start >= FINAL_X_MIN)
+            & (x_start < CROSS_MAX_START_X)
+            & in_box
+            & (dist >= CROSS_DIST_MIN_M)
+            & (np.abs(dy) >= CROSS_LATERAL_DELTA_MIN_M)
+        ),
         "from_deep": start_zone == "def",
         "final_third": start_zone == "att",
         "in_box": in_box,
