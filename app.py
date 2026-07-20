@@ -3132,6 +3132,61 @@ st.markdown(
             0 0 14px rgba(239, 68, 68, 0.62),
             0 2px 8px rgba(2, 6, 23, 0.45);
     }
+    .pa-xp-gradient-bar-tip {
+        position: absolute;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 5;
+        display: inline-flex;
+    }
+    .pa-xp-gradient-bar-tip .pa-xp-gradient-bar-marker {
+        position: relative;
+        top: auto;
+        left: auto;
+        transform: none;
+        cursor: help;
+    }
+    .pa-xp-gradient-bar-tipbox {
+        position: absolute;
+        left: 50%;
+        bottom: calc(100% + 8px);
+        transform: translateX(-50%);
+        min-width: 11.5rem;
+        padding: 0.45rem 0.55rem;
+        border-radius: 8px;
+        border: 1px solid #334155;
+        background: rgba(15, 23, 42, 0.96);
+        color: #e2e8f0;
+        font-size: 0.72rem;
+        line-height: 1.35;
+        white-space: nowrap;
+        box-shadow: 0 10px 24px rgba(2, 6, 23, 0.45);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 0.14s ease, visibility 0.14s ease;
+        z-index: 20;
+    }
+    .pa-xp-gradient-bar-tip-title {
+        display: block;
+        margin-bottom: 0.28rem;
+        color: #93c5fd;
+        font-size: 0.64rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+    .pa-xp-gradient-bar-tip-line {
+        display: block;
+        color: #cbd5e1;
+        font-size: 0.72rem;
+        font-weight: 600;
+    }
+    .pa-xp-gradient-bar-tip:hover .pa-xp-gradient-bar-tipbox,
+    .pa-xp-gradient-bar-tip:focus-within .pa-xp-gradient-bar-tipbox {
+        opacity: 1;
+        visibility: visible;
+    }
     .pa-xp-gradient-bar-ticks {
         display: flex;
         justify-content: space-between;
@@ -4945,6 +5000,36 @@ def _xp_gradient_bar_tier(pct: float) -> str:
     return "cool"
 
 
+def _xp_gradient_bar_tooltip_html(xp_profile: dict, display_key: str) -> str:
+    title = xstats.XP_PROFILE_BAR_LABELS.get(display_key, display_key)
+    metric_keys = xstats.XP_PROFILE_BAR_METRICS.get(display_key, ())
+    lines = "".join(
+        '<span class="pa-xp-gradient-bar-tip-line">'
+        f'{html.escape(xstats.stats_metric_label(key))}: '
+        f'{html.escape(xstats.format_stats_value(key, xp_profile.get(key)))}'
+        "</span>"
+        for key in metric_keys
+    )
+    return (
+        f'<span class="pa-xp-gradient-bar-tip-title">{html.escape(title)}</span>'
+        f"{lines}"
+    )
+
+
+def _xp_gradient_bar_marker_html(
+    pct: float,
+    xp_profile: dict,
+    display_key: str,
+) -> str:
+    tooltip = _xp_gradient_bar_tooltip_html(xp_profile, display_key)
+    return (
+        f'<span class="pa-xp-gradient-bar-tip" style="left:{pct:.1f}%">'
+        '<span class="pa-xp-gradient-bar-marker" tabindex="0"></span>'
+        f'<span class="pa-xp-gradient-bar-tipbox">{tooltip}</span>'
+        "</span>"
+    )
+
+
 def _xp_gradient_bar_row_html(label: str, display_key: str, xp_profile: dict) -> str:
     pct = _xp_profile_display_pct(xp_profile, display_key)
     if pct is None:
@@ -4958,11 +5043,12 @@ def _xp_gradient_bar_row_html(label: str, display_key: str, xp_profile: dict) ->
         )
     else:
         tier = _xp_gradient_bar_tier(pct)
+        marker_html = _xp_gradient_bar_marker_html(pct, xp_profile, display_key)
         track_html = (
             f'<div class="pa-xp-gradient-bar-shell pa-xp-gradient-bar-tier-{tier}">'
             '<div class="pa-xp-gradient-bar-track">'
             f'<span class="pa-xp-gradient-bar-glow" style="left:{pct:.1f}%"></span>'
-            f'<span class="pa-xp-gradient-bar-marker" style="left:{pct:.1f}%"></span>'
+            f"{marker_html}"
             "</div>"
             '<div class="pa-xp-gradient-bar-ticks" aria-hidden="true">'
             "<span></span><span></span><span></span><span></span>"

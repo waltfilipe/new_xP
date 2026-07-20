@@ -374,8 +374,9 @@ def apply_per90_metrics(metrics: dict[str, float | int], minutes: float | None) 
     mins_f = float(minutes)
     factor = 90.0 / mins_f
     metrics["xp_per_90"] = float(metrics.get("xp_m4_total", 0.0)) * factor
-    threat_total = int(metrics.get("xp_m4_threat_passes", 0))
-    metrics["xp_m4_threat_passes_p90"] = float(threat_total) * factor
+    threat_count = int(metrics.get("xp_m4_threat_passes", 0))
+    metrics["threat_passes_p90"] = float(threat_count) * factor
+    metrics["xp_m4_threat_passes_p90"] = float(metrics.get("xp_m4_threat_xp_total", 0.0)) * factor
     for band in BANDS:
         band_threats = int(metrics.get(f"xp_m4_threat_{band}", 0))
         metrics[f"xp_m4_threat_{band}_p90"] = float(band_threats) * factor
@@ -415,24 +416,21 @@ XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
 )
 
-# Player Analysis passing blocks (Volume → Padrões)
+# Player Analysis passing blocks
 XP_PLAYER_ANALYSIS_BLOCKS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Volume", ("xp_per_90",)),
+    ("Volume", (
+        "xp_per_90",
+        "threat_passes_p90",
+    )),
     ("Efetividade", (
-        "xp_m4_per_pass", "xp_m4_threat_rate",
-        "xp_m4_per_pass_short", "xp_m4_threat_rate_short",
-        "xp_m4_per_pass_long", "xp_m4_threat_rate_long",
+        "xp_m4_per_pass",
+        "xp_m4_per_threat_pass",
+        "xp_m4_threat_rate",
     )),
     ("Criação", (
         "xp_final_third_share", "threat_final_third_p90",
         "xp_box_share", "threat_in_box_p90",
         "xp_from_deep", "threat_from_deep_p90",
-    )),
-    ("Padrões", (
-        "special_diagonal_long_p90", "xp_diagonal_long_total",
-        "special_line_break_p90", "xp_line_break_total",
-        "special_inversion_p90", "xp_inversion_total",
-        "special_cross_p90", "xp_cross_total",
     )),
 )
 
@@ -467,6 +465,17 @@ XP_PROFILE_BAR_KEYS: tuple[str, ...] = (
 XP_PROFILE_BAR_LABELS: dict[str, str] = {
     "xp_quality_display": "Quality",
     "xp_consistency_display": "Consistency",
+}
+
+XP_PROFILE_BAR_METRICS: dict[str, tuple[str, ...]] = {
+    "xp_quality_display": (
+        "xp_residual_median",
+        "xp_surprise_rate",
+    ),
+    "xp_consistency_display": (
+        "xp_game_std_adj_score",
+        "xp_games_above_median_pct",
+    ),
 }
 
 BUILDER_BASE_METRICS: tuple[str, ...] = (
@@ -544,9 +553,11 @@ def iter_xp_stats_sections() -> tuple[tuple[str, tuple[str, ...]], ...]:
 
 XP_STATS_LABELS: dict[str, str] = {
     "xp_per_90": "xP (Per game)",
+    "threat_passes_p90": "Threat Passes (Per game)",
     "xp_m4_total": "xP Total",
     "xp_m4_threat_passes_p90": "xP Threat Passes (Per game)",
     "xp_m4_per_pass": "xP/Passe",
+    "xp_m4_per_threat_pass": "xP/Threat Pass",
     "xp_m4_threat_rate": "% Threat Passes",
     "xp_m4_per_pass_short": "xP/Passe",
     "xp_m4_per_pass_long": "xP/Passe",
@@ -1038,6 +1049,10 @@ def format_stats_value(key: str, value: float | int | None) -> str:
         return f"{val:.3f}"
     if key == "xp_m4_per_pass":
         return f"{val:.3f}"
+    if key == "xp_m4_per_threat_pass":
+        return f"{val:.3f}"
+    if key == "threat_passes_p90":
+        return f"{val:.2f}"
     if key.startswith("xp_residual"):
         return f"{val:+.4f}"
     if key.endswith("_p90") or key == "xp_per_90" or key == "xp_game_mean" or key == "xp_game_std":

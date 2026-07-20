@@ -491,6 +491,16 @@ def compute_player_xp_metrics(grp: pd.DataFrame) -> dict[str, float | int]:
         "xp_m4_p90": float(scored[XP_COL].quantile(0.90)),
         "xp_m4_threat_passes": int(scored[THREAT_COL].sum()) if THREAT_COL in scored.columns else 0,
         "xp_m4_threat_rate": float(scored[THREAT_COL].mean()) if THREAT_COL in scored.columns else 0.0,
+        "xp_m4_threat_xp_total": (
+            float(scored.loc[scored[THREAT_COL], XP_COL].sum())
+            if THREAT_COL in scored.columns and scored[THREAT_COL].any()
+            else 0.0
+        ),
+        "xp_m4_per_threat_pass": (
+            float(scored.loc[scored[THREAT_COL], XP_COL].mean())
+            if THREAT_COL in scored.columns and scored[THREAT_COL].any()
+            else 0.0
+        ),
         "pass_mean_distance": (
             float(scored["pass_distance"].mean())
             if n_passes and "pass_distance" in scored.columns
