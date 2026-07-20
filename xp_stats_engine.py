@@ -322,10 +322,12 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
             out["xp_residual_positive"] = float(np.maximum(residual, 0.0).sum()) / n
             out["xp_residual_negative"] = float(np.minimum(residual, 0.0).sum()) / n
             out["xp_residual_mean"] = float(residual.mean())
+            out["xp_residual_median"] = float(np.median(residual))
         else:
             out["xp_residual_positive"] = 0.0
             out["xp_residual_negative"] = 0.0
             out["xp_residual_mean"] = 0.0
+            out["xp_residual_median"] = 0.0
         out["xp_surprise_rate"] = float((residual > 0).mean())
         p75 = float(np.quantile(xp, 0.75)) if n else 0.0
         high_xp = xp >= p75
@@ -340,6 +342,7 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
         out["xp_residual_positive"] = 0.0
         out["xp_residual_negative"] = 0.0
         out["xp_residual_mean"] = 0.0
+        out["xp_residual_median"] = 0.0
         out["xp_surprise_rate"] = 0.0
         out["xp_threat_conversion"] = 0.0
         out["xp_threat_mean_xp"] = 0.0
@@ -399,10 +402,10 @@ XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "xp_from_deep", "threat_from_deep_p90",
     )),
     ("Qualidade", (
-        "xp_residual_mean", "xp_residual_positive", "xp_surprise_rate",
+        "xp_residual_median", "xp_surprise_rate",
     )),
     ("Consistência", (
-        "xp_game_mean", "xp_game_std", "xp_games_above_median_pct",
+        "xp_game_mean", "xp_game_std_adj_score", "xp_games_above_median_pct",
     )),
     (f"Short ({DISTANCE_BAND_LABELS['short']})", (
         "xp_m4_per_pass_short", "xp_m4_threat_rate_short",
@@ -412,7 +415,7 @@ XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
 )
 
-# Player Analysis passing blocks (Volume → Consistência)
+# Player Analysis passing blocks (Volume → Padrões)
 XP_PLAYER_ANALYSIS_BLOCKS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Volume", ("xp_per_90",)),
     ("Efetividade", (
@@ -430,12 +433,6 @@ XP_PLAYER_ANALYSIS_BLOCKS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "special_line_break_p90", "xp_line_break_total",
         "special_inversion_p90", "xp_inversion_total",
         "special_cross_p90", "xp_cross_total",
-    )),
-    ("Qualidade", (
-        "xp_residual_mean", "xp_residual_positive", "xp_surprise_rate",
-    )),
-    ("Consistência", (
-        "xp_game_mean", "xp_game_std", "xp_games_above_median_pct",
     )),
 )
 
@@ -501,15 +498,15 @@ FINISHER_METRICS: tuple[str, ...] = (
     "special_cross_p90",
 )
 QUALITY_METRICS: tuple[str, ...] = (
-    "xp_residual_mean",
-    "xp_residual_positive",
+    "xp_residual_median",
     "xp_surprise_rate",
 )
 CONSISTENCY_METRICS: tuple[str, ...] = (
     "xp_game_mean",
     "xp_games_above_median_pct",
+    "xp_game_std_adj_score",
 )
-CONSISTENCY_INVERT_METRICS: tuple[str, ...] = ("xp_game_std",)
+CONSISTENCY_INVERT_METRICS: tuple[str, ...] = ()
 
 
 def iter_xp_player_analysis_blocks() -> tuple[tuple[str, tuple[str, ...]], ...]:
@@ -581,6 +578,7 @@ XP_STATS_LABELS: dict[str, str] = {
     "special_in_box_p90": "Na área (Per game)",
     "special_from_deep_p90": "From deep (Per game)",
     "xp_residual_mean": "Resíduo médio/Passe",
+    "xp_residual_median": "Resíduo mediano/Passe",
     "xp_residual_positive": "xP acima do esperado/Passe",
     "xp_residual_negative": "xP abaixo do esperado / passe",
     "xp_surprise_rate": "Surprise Rate",
@@ -591,6 +589,8 @@ XP_STATS_LABELS: dict[str, str] = {
     "xp_max_pass": "Max single-pass xP",
     "xp_game_mean": "xP médio (Per game)",
     "xp_game_std": "Desvio xP",
+    "xp_game_std_adj": "Desvio xP ajustado",
+    "xp_game_std_adj_score": "Estabilidade ajustada",
     "xp_pass_cv": "xP CV (passes)",
     "xp_games_above_median_pct": "% Jogos acima da mediana",
     "xp_pass_std": "Desvio xP (passes)",
@@ -814,6 +814,24 @@ def _attach_index_display_scores(
         row[display_key] = float(pe.rank_to_display_score(rank, pool_size))
 
 
+def _attach_game_std_adjusted(rows: list[dict]) -> None:
+    """Residual of game-level xP std after regressing on game mean (within position)."""
+    if not rows:
+        return
+    means = np.array([float(r.get("xp_game_mean") or 0.0) for r in rows], dtype=float)
+    stds = np.array([float(r.get("xp_game_std") or 0.0) for r in rows], dtype=float)
+    if len(rows) < 3 or float(np.std(means)) <= 1e-12:
+        for row in rows:
+            row["xp_game_std_adj"] = 0.0
+            row["xp_game_std_adj_score"] = 0.0
+        return
+    slope, intercept = np.polyfit(means, stds, 1)
+    adjusted = stds - (slope * means + intercept)
+    for row, val in zip(rows, adjusted):
+        row["xp_game_std_adj"] = float(val)
+        row["xp_game_std_adj_score"] = float(-val)
+
+
 def attach_composite_indices(players: list[dict]) -> None:
     """Within-position z-score composites for xP archetype radar and profile bars."""
     if not players:
@@ -824,6 +842,7 @@ def attach_composite_indices(players: list[dict]) -> None:
         pools.setdefault(group, []).append(player)
 
     for rows in pools.values():
+        _attach_game_std_adjusted(rows)
         df = pd.DataFrame(rows)
         position_group = str(rows[0].get("position_group") or "")
         builder_cols = list(BUILDER_BASE_METRICS)
@@ -836,11 +855,7 @@ def attach_composite_indices(players: list[dict]) -> None:
             "xp_progressor_index": _mean_z_columns(df, PROGRESSOR_METRICS),
             "xp_finisher_pass_index": _mean_z_columns(df, FINISHER_METRICS),
             "xp_quality_index": _mean_z_columns(df, QUALITY_METRICS),
-            "xp_consistency_index": _mean_z_columns(
-                df,
-                CONSISTENCY_METRICS + CONSISTENCY_INVERT_METRICS,
-                invert=CONSISTENCY_INVERT_METRICS,
-            ),
+            "xp_consistency_index": _mean_z_columns(df, CONSISTENCY_METRICS),
         }
         display_map = {
             "xp_builder_index": "xp_archetype_builder_display",
@@ -1027,6 +1042,8 @@ def format_stats_value(key: str, value: float | int | None) -> str:
         return f"{val:+.4f}"
     if key.endswith("_p90") or key == "xp_per_90" or key == "xp_game_mean" or key == "xp_game_std":
         return f"{val:.2f}"
+    if key in {"xp_game_std_adj", "xp_game_std_adj_score"}:
+        return f"{val:+.3f}"
     if key == "xp_pass_cv" or key == "xp_pass_std":
         return f"{val:.3f}"
     if key == "xp_max_pass" or key == "xp_m4_p90":

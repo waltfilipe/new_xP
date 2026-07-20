@@ -5050,7 +5050,6 @@ def _build_xp_stats_card_html(
         '<p class="pa-pillar-group-label">Passing</p>'
         f'<div class="pa-pillar-group">{passing_accordions}</div>'
     )
-    archetype_html = _player_archetype_block_html(player)
     carrying_html = (
         '<p class="pa-pillar-group-label">Carrying</p>'
         '<div class="pa-pillar-group pa-pillar-group-empty">'
@@ -5059,7 +5058,7 @@ def _build_xp_stats_card_html(
     )
     return (
         '<div class="player-card pa-pillars-card">'
-        f'<div class="pa-pillars-stack">{passing_html}{archetype_html}{carrying_html}</div>'
+        f'<div class="pa-pillars-stack">{passing_html}{carrying_html}</div>'
         "</div>"
     )
 
