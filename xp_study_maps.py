@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import functools
+import io
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -18,7 +22,6 @@ from xp_study_engine import FIELD_X, FIELD_Y, XP_GRID_COLS, XP_GRID_ROWS, XP_PAS
 FIG_W, FIG_H = 7.0, 4.65
 FIG_DPI = 220
 MAP_PLOTLY_HEIGHT = 640
-PITCH_ASPECT = FIELD_X / FIELD_Y
 ARROW_WIDTH = 0.9
 ARROW_HEADWIDTH = 1.3
 ARROW_HEADLENGTH = 1.3
@@ -190,30 +193,167 @@ def _plasma_rgba(values: np.ndarray, *, vmax: float | None = None) -> list[str]:
     return colors
 
 
-def _plotly_pitch_shapes() -> list[dict]:
-    line = dict(color="rgba(255,255,255,0.94)", width=1.8)
-    empty = "rgba(0,0,0,0)"
-    grass = "rgba(30, 58, 47, 0.55)"
-    return [
-        dict(type="rect", x0=0, y0=0, x1=FIELD_X, y1=FIELD_Y, fillcolor=grass, line=dict(width=0)),
-        dict(type="rect", x0=0, y0=0, x1=FIELD_X, y1=FIELD_Y, line=dict(color="rgba(255,255,255,0.96)", width=2.0), fillcolor=empty),
-        dict(type="line", x0=FIELD_X / 2, y0=0, x1=FIELD_X / 2, y1=FIELD_Y, line=line),
-        dict(type="circle", x0=FIELD_X / 2 - 9, y0=FIELD_Y / 2 - 9, x1=FIELD_X / 2 + 9, y1=FIELD_Y / 2 + 9, line=line, fillcolor=empty),
-        dict(type="rect", x0=0, y0=18, x1=18, y1=62, line=line, fillcolor=empty),
-        dict(type="rect", x0=102, y0=18, x1=FIELD_X, y1=62, line=line, fillcolor=empty),
-        dict(type="circle", x0=FIELD_X / 2 - 0.35, y0=FIELD_Y / 2 - 0.35, x1=FIELD_X / 2 + 0.35, y1=FIELD_Y / 2 + 0.35, fillcolor="rgba(255,255,255,0.95)", line=dict(width=0)),
-    ]
+def _draw_passes_on_pitch(
+    ax,
+    pitch: Pitch,
+    work,
+    *,
+    xp_col: str | None = "xp_m4",
+) -> None:
+    """Draw mplsoccer arrows and origin/destination markers on an existing pitch axis."""
+    color_by_xp = xp_col is not None and xp_col in work.columns
+    if color_by_xp:
+        values = work[xp_col].to_numpy(dtype=float)
+        vmax = max(float(np.max(values)), 0.05)
+        norm = Normalize(vmin=0.0, vmax=min(vmax, XP_PASS_MAX))
+    else:
+        norm = None
+
+    for row in work.itertuples(index=False):
+        if color_by_xp:
+            xp_value = float(getattr(row, xp_col))
+            color = CMAP_XP(norm(xp_value))
+            lw_scale = 0.85 + 0.35 * min(xp_value / XP_PASS_MAX, 1.0)
+        else:
+            color = "#60a5fa"
+            lw_scale = 1.0
+        _delicate_arrows(
+            pitch,
+            ax,
+            row.x_start,
+            row.y_start,
+            row.x_end,
+            row.y_end,
+            color,
+            alpha=0.9,
+            lw_scale=lw_scale,
+        )
+        pitch.scatter(
+            row.x_start,
+            row.y_start,
+            s=28,
+            marker="o",
+            color=color,
+            edgecolors="white",
+            linewidths=0.5,
+            ax=ax,
+            zorder=5,
+        )
+        pitch.scatter(
+            row.x_end,
+            row.y_end,
+            s=36,
+            marker="s",
+            color=color,
+            edgecolors="white",
+            linewidths=0.5,
+            ax=ax,
+            zorder=6,
+        )
 
 
-def _plotly_map_layout(*, title: str, height: int = MAP_PLOTLY_HEIGHT, show_colorbar: bool = False):
-    pad_x = 3.0
-    pad_y = pad_x / PITCH_ASPECT
+@functools.lru_cache(maxsize=1)
+def _empty_pitch_raster() -> tuple[str, float, float, float, float]:
+    """Rasterize an empty mplsoccer StatsBomb pitch for Plotly background."""
+    fig, ax, _pitch = _base_pitch()
+    ax.set_axis_off()
+    fig.subplots_adjust(0, 0, 1, 1)
+    ax.set_position([0, 0, 1, 1])
+    x0, x1 = (float(v) for v in ax.get_xlim())
+    y_bottom, y_top = (float(v) for v in ax.get_ylim())
+    buf = io.BytesIO()
+    fig.savefig(
+        buf,
+        format="png",
+        dpi=FIG_DPI,
+        facecolor=fig.get_facecolor(),
+        edgecolor="none",
+    )
+    plt.close(fig)
+    uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    return uri, x0, x1, y_bottom, y_top
+
+
+def _pitch_passes_raster(
+    work,
+    *,
+    xp_col: str | None = "xp_m4",
+) -> tuple[str, float, float, float, float]:
+    """Rasterize mplsoccer pitch + passes for use as a Plotly background image."""
+    fig, ax, pitch = _base_pitch()
+    if work is not None and not work.empty:
+        _draw_passes_on_pitch(ax, pitch, work, xp_col=xp_col)
+    ax.set_axis_off()
+    fig.subplots_adjust(0, 0, 1, 1)
+    ax.set_position([0, 0, 1, 1])
+    x0, x1 = (float(v) for v in ax.get_xlim())
+    y_bottom, y_top = (float(v) for v in ax.get_ylim())
+    buf = io.BytesIO()
+    fig.savefig(
+        buf,
+        format="png",
+        dpi=FIG_DPI,
+        facecolor=fig.get_facecolor(),
+        edgecolor="none",
+    )
+    plt.close(fig)
+    uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    return uri, x0, x1, y_bottom, y_top
+
+
+def _plotly_pitch_image(x0: float, x1: float, y_bottom: float, y_top: float, source: str) -> dict:
+    """Map a matplotlib pitch raster onto Plotly axis coordinates."""
+    y_lo = min(y_bottom, y_top)
+    y_hi = max(y_bottom, y_top)
+    sizey = y_hi - y_lo
+    if y_bottom > y_top:
+        return dict(
+            source=source,
+            xref="x",
+            yref="y",
+            x=x0,
+            y=y_hi,
+            sizex=x1 - x0,
+            sizey=-sizey,
+            xanchor="left",
+            yanchor="top",
+            sizing="stretch",
+            layer="below",
+        )
+    return dict(
+        source=source,
+        xref="x",
+        yref="y",
+        x=x0,
+        y=y_lo,
+        sizex=x1 - x0,
+        sizey=sizey,
+        xanchor="left",
+        yanchor="bottom",
+        sizing="stretch",
+        layer="below",
+    )
+
+
+def _plotly_map_layout(
+    *,
+    title: str,
+    height: int = MAP_PLOTLY_HEIGHT,
+    show_colorbar: bool = False,
+    pitch_image: dict | None = None,
+    x0: float,
+    x1: float,
+    y_bottom: float,
+    y_top: float,
+):
+    y_lo = min(y_bottom, y_top)
+    y_hi = max(y_bottom, y_top)
     return dict(
         title=dict(text=title, font=dict(size=13, color="#f8fafc"), x=0.5, xanchor="center", y=0.98),
         height=height,
         margin=dict(l=12, r=88 if show_colorbar else 20, t=52, b=12),
         paper_bgcolor="#0f172a",
-        plot_bgcolor="#1a1a2e",
+        plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#cbd5e1", size=10),
         hoverlabel=dict(
             bgcolor="#111827",
@@ -221,20 +361,20 @@ def _plotly_map_layout(*, title: str, height: int = MAP_PLOTLY_HEIGHT, show_colo
             font=dict(color="#f8fafc", size=12),
         ),
         xaxis=dict(
-            range=[-pad_x, FIELD_X + pad_x],
+            range=[x0, x1],
             visible=False,
             fixedrange=True,
             constrain="domain",
         ),
         yaxis=dict(
-            range=[-pad_y, FIELD_Y + pad_y],
+            range=[y_lo, y_hi],
             visible=False,
             scaleanchor="x",
-            scaleratio=1.0 / PITCH_ASPECT,
+            scaleratio=(y_hi - y_lo) / (x1 - x0),
             fixedrange=True,
         ),
         showlegend=False,
-        shapes=_plotly_pitch_shapes(),
+        images=[pitch_image] if pitch_image else [],
         autosize=True,
     )
 
@@ -250,16 +390,28 @@ def build_special_passes_season_map_figure(
     residual_col: str = "xp_residual",
     height: int = MAP_PLOTLY_HEIGHT,
 ):
-    """Interactive season map with xP / residual hover on pass origins."""
+    """Interactive map: mplsoccer raster background + hover on pass origins."""
     import plotly.graph_objects as go
 
     title = f"{player_name} · {category_label} · {season_label}"
     if passes is None or passes.empty:
+        uri, x0, x1, y_bottom, y_top = _empty_pitch_raster()
+        pitch_image = _plotly_pitch_image(x0, x1, y_bottom, y_top, uri)
         fig = go.Figure()
-        fig.update_layout(**_plotly_map_layout(title=title, height=height))
+        fig.update_layout(
+            **_plotly_map_layout(
+                title=title,
+                height=height,
+                pitch_image=pitch_image,
+                x0=x0,
+                x1=x1,
+                y_bottom=y_bottom,
+                y_top=y_top,
+            )
+        )
         fig.add_annotation(
-            x=FIELD_X / 2,
-            y=FIELD_Y / 2,
+            x=(x0 + x1) / 2,
+            y=(min(y_bottom, y_top) + max(y_bottom, y_top)) / 2,
             text="Sem passes para este filtro",
             showarrow=False,
             font=dict(color="#f8fafc", size=12),
@@ -267,16 +419,16 @@ def build_special_passes_season_map_figure(
         return fig
 
     work = passes.copy()
-    fig = go.Figure()
+    uri, x0, x1, y_bottom, y_top = _pitch_passes_raster(work, xp_col=xp_col)
+    pitch_image = _plotly_pitch_image(x0, x1, y_bottom, y_top, uri)
+
     has_xp = xp_col in work.columns
     if has_xp:
         values = work[xp_col].to_numpy(dtype=float)
         vmax = min(max(float(np.max(values)), 0.05), XP_PASS_MAX)
-        colors = _plasma_rgba(values, vmax=vmax)
     else:
         values = np.zeros(len(work))
         vmax = XP_PASS_MAX
-        colors = ["rgba(96,165,250,0.92)"] * len(work)
 
     xp_vals = work[xp_col].to_numpy(dtype=float) if has_xp else np.zeros(len(work))
     if residual_col in work.columns:
@@ -286,58 +438,16 @@ def build_special_passes_season_map_figure(
     else:
         residual_vals = np.zeros(len(work))
 
-    for row, color in zip(work.itertuples(index=False), colors):
-        width = 2.0
-        if has_xp:
-            width = 1.8 + 1.6 * min(float(getattr(row, xp_col)) / vmax, 1.0)
-        fig.add_annotation(
-            x=row.x_end,
-            y=row.y_end,
-            ax=row.x_start,
-            ay=row.y_start,
-            xref="x",
-            yref="y",
-            axref="x",
-            ayref="y",
-            showarrow=True,
-            arrowhead=3,
-            arrowsize=1.35,
-            arrowwidth=width,
-            arrowcolor=color,
-            opacity=0.94,
-        )
-
-    fig.add_trace(
-        go.Scatter(
-            x=work["x_end"].to_numpy(dtype=float),
-            y=work["y_end"].to_numpy(dtype=float),
-            mode="markers",
-            marker=dict(
-                size=11,
-                symbol="square",
-                color=colors,
-                line=dict(width=1.0, color="#f8fafc"),
-            ),
-            hoverinfo="skip",
-            showlegend=False,
-        )
-    )
-
-    marker_sizes = [
-        12.0 + 8.0 * (float(v) / vmax if vmax > 0 else 0.0)
-        for v in (values if has_xp else np.zeros(len(work)))
-    ]
+    fig = go.Figure()
     fig.add_trace(
         go.Scatter(
             x=work["x_start"].to_numpy(dtype=float),
             y=work["y_start"].to_numpy(dtype=float),
             mode="markers",
             marker=dict(
-                size=marker_sizes,
-                sizemode="diameter",
-                color=colors,
-                line=dict(width=1.2, color="#f8fafc"),
-                opacity=0.98,
+                size=18,
+                color="rgba(0,0,0,0)",
+                line=dict(width=0, color="rgba(0,0,0,0)"),
             ),
             customdata=np.column_stack([xp_vals, residual_vals]),
             hovertemplate=(
@@ -382,6 +492,11 @@ def build_special_passes_season_map_figure(
             title=f"{title}<br><sup>{count} passes · hover na origem para xP e resíduo</sup>",
             height=height,
             show_colorbar=has_xp,
+            pitch_image=pitch_image,
+            x0=x0,
+            x1=x1,
+            y_bottom=y_bottom,
+            y_top=y_top,
         )
     )
     return fig
@@ -412,36 +527,12 @@ def draw_special_passes_season_map(
 
     work = passes.copy()
     color_by_xp = xp_col is not None and xp_col in work.columns
+    _draw_passes_on_pitch(ax, pitch, work, xp_col=xp_col)
+
     if color_by_xp:
         values = work[xp_col].to_numpy(dtype=float)
         vmax = max(float(np.max(values)), 0.05)
         norm = Normalize(vmin=0.0, vmax=min(vmax, XP_PASS_MAX))
-    else:
-        norm = None
-
-    for row in work.itertuples(index=False):
-        if color_by_xp:
-            xp_value = float(getattr(row, xp_col))
-            color = CMAP_XP(norm(xp_value))
-            lw_scale = 0.85 + 0.35 * min(xp_value / XP_PASS_MAX, 1.0)
-        else:
-            color = "#60a5fa"
-            lw_scale = 1.0
-        _delicate_arrows(
-            pitch, ax,
-            row.x_start, row.y_start, row.x_end, row.y_end,
-            color, alpha=0.9, lw_scale=lw_scale,
-        )
-        pitch.scatter(
-            row.x_start, row.y_start,
-            s=28, marker="o", color=color, edgecolors="white", linewidths=0.5, ax=ax, zorder=5,
-        )
-        pitch.scatter(
-            row.x_end, row.y_end,
-            s=36, marker="s", color=color, edgecolors="white", linewidths=0.5, ax=ax, zorder=6,
-        )
-
-    if color_by_xp:
         sm = ScalarMappable(norm=norm, cmap=CMAP_XP)
         sm.set_array([])
         cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.02)
