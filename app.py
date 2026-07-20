@@ -3799,15 +3799,27 @@ def _coerce_position_block_id(
     return block_id
 
 
-def _position_select_widget_key(key_prefix: str) -> str:
+def _legacy_position_select_widget_key(key_prefix: str) -> str:
     return f"{key_prefix}_position_select"
 
 
-def _sync_position_select_from_block(block_id: str, *, key_prefix: str) -> None:
-    st.session_state[_position_select_widget_key(key_prefix)] = block_id
+def _position_block_prev_key(state_key: str) -> str:
+    return f"{state_key}__prev"
 
 
-def _clear_position_select_widgets() -> None:
+def _sync_position_block_state(
+    block_id: str,
+    *,
+    state_key: str,
+    key_prefix: str,
+    blocks: tuple[tuple[str, str, frozenset[str] | None, str | None], ...] = PLAYER_ANALYSIS_POSITION_BLOCKS,
+) -> None:
+    st.session_state[state_key] = _coerce_position_block_id(block_id, blocks)
+    st.session_state.pop(_legacy_position_select_widget_key(key_prefix), None)
+    st.session_state.pop(_position_block_prev_key(state_key), None)
+
+
+def _clear_legacy_position_select_widgets() -> None:
     for key in list(st.session_state.keys()):
         if key.endswith("_position_select"):
             st.session_state.pop(key, None)
@@ -3822,26 +3834,29 @@ def _render_position_block_slicer(
 ) -> tuple[frozenset[str], frozenset[str]]:
     block_ids = [block_id for block_id, *_rest in blocks]
     labels_by_id = {block_id: label for block_id, label, *_rest in blocks}
-    current_block = _coerce_position_block_id(st.session_state.get(state_key), blocks)
-    st.session_state[state_key] = current_block
+    legacy_select_key = _legacy_position_select_widget_key(key_prefix)
+    if state_key not in st.session_state and legacy_select_key in st.session_state:
+        st.session_state[state_key] = st.session_state[legacy_select_key]
+    st.session_state[state_key] = _coerce_position_block_id(st.session_state.get(state_key), blocks)
+    st.session_state.pop(legacy_select_key, None)
 
-    pos_select_key = _position_select_widget_key(key_prefix)
-    if pos_select_key not in st.session_state:
-        st.session_state[pos_select_key] = current_block
+    prev_key = _position_block_prev_key(state_key)
+    previous_block = st.session_state.get(prev_key)
 
     selected_block = st.selectbox(
         "Posição",
         options=block_ids,
         format_func=lambda block_id: labels_by_id.get(block_id, block_id),
-        key=pos_select_key,
+        key=state_key,
     )
-    if selected_block != current_block:
-        st.session_state[state_key] = selected_block
+
+    if previous_block is not None and previous_block != selected_block:
         if state_key == PLAYER_ANALYSIS_POSITION_BLOCKS_KEY:
             st.session_state.pop(PLAYER_ANALYSIS_SELECT_KEY, None)
             _clear_player_select_widgets()
             st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
-        st.rerun()
+
+    st.session_state[prev_key] = selected_block
 
     lookup = block_map or PLAYER_POSITION_BLOCK_BY_ID
     return _position_filter_from_blocks({selected_block}, block_map=lookup)
@@ -6278,8 +6293,11 @@ def _sync_player_analysis_selection(
         player = players_by_id[qp_id]
         if st.session_state.get("_pa_url_player_id") != qp_id:
             block_id = _position_block_for_player(player)
-            st.session_state[PLAYER_ANALYSIS_POSITION_BLOCKS_KEY] = block_id
-            _sync_position_select_from_block(block_id, key_prefix="pa")
+            _sync_position_block_state(
+                block_id,
+                state_key=PLAYER_ANALYSIS_POSITION_BLOCKS_KEY,
+                key_prefix="pa",
+            )
         if st.session_state.get("_pa_url_player_id") != qp_id:
             st.session_state["_pa_url_player_id"] = qp_id
             st.session_state["map_player_id"] = qp_id
