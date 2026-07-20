@@ -2304,6 +2304,60 @@ st.markdown(
     div[class*="st-key-maps_pos_block_"] [data-testid="stButton"] {
         width: 100%;
     }
+    .pa-position-blocks [data-testid="stCheckbox"],
+    .st-key-pa_position_blocks [data-testid="stCheckbox"],
+    .st-key-maps_position_blocks [data-testid="stCheckbox"],
+    div[class*="st-key-pa_pos_cb_"] [data-testid="stCheckbox"],
+    div[class*="st-key-scatter_pos_cb_"] [data-testid="stCheckbox"] {
+        width: 100%;
+        min-height: 2.85rem;
+        margin: 0;
+        padding: 0.2rem 0.35rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(160deg, #151b2b 0%, #101522 100%);
+        border: 1px solid #2a3550;
+        border-radius: 10px;
+    }
+    .pa-position-blocks [data-testid="stCheckbox"]:has(input:checked),
+    .st-key-pa_position_blocks [data-testid="stCheckbox"]:has(input:checked),
+    .st-key-maps_position_blocks [data-testid="stCheckbox"]:has(input:checked),
+    div[class*="st-key-pa_pos_cb_"] [data-testid="stCheckbox"]:has(input:checked),
+    div[class*="st-key-scatter_pos_cb_"] [data-testid="stCheckbox"]:has(input:checked) {
+        background: linear-gradient(160deg, #1e3a5f 0%, #172554 100%);
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.22);
+    }
+    .pa-position-blocks [data-testid="stCheckbox"] label,
+    .st-key-pa_position_blocks [data-testid="stCheckbox"] label,
+    .st-key-maps_position_blocks [data-testid="stCheckbox"] label,
+    div[class*="st-key-pa_pos_cb_"] [data-testid="stCheckbox"] label,
+    div[class*="st-key-scatter_pos_cb_"] [data-testid="stCheckbox"] label {
+        width: 100%;
+        margin: 0;
+        padding-left: 0.15rem;
+        font-size: 0.62rem;
+        font-weight: 700;
+        line-height: 1.12;
+        color: #93c5fd;
+        text-align: center;
+    }
+    .pa-position-blocks [data-testid="stCheckbox"]:has(input:checked) label,
+    .st-key-pa_position_blocks [data-testid="stCheckbox"]:has(input:checked) label,
+    .st-key-maps_position_blocks [data-testid="stCheckbox"]:has(input:checked) label,
+    div[class*="st-key-pa_pos_cb_"] [data-testid="stCheckbox"]:has(input:checked) label,
+    div[class*="st-key-scatter_pos_cb_"] [data-testid="stCheckbox"]:has(input:checked) label {
+        color: #dbeafe;
+    }
+    .pa-position-blocks [data-testid="stCheckbox"] label p,
+    .st-key-pa_position_blocks [data-testid="stCheckbox"] label p,
+    .st-key-maps_position_blocks [data-testid="stCheckbox"] label p,
+    div[class*="st-key-pa_pos_cb_"] [data-testid="stCheckbox"] label p,
+    div[class*="st-key-scatter_pos_cb_"] [data-testid="stCheckbox"] label p {
+        font-size: 0.62rem;
+        margin: 0;
+    }
     .pa-position-blocks [data-testid="stButton"] button,
     .st-key-pa_position_blocks [data-testid="stButton"] button,
     .st-key-pa_archetype_blocks [data-testid="stButton"] button,
@@ -3001,8 +3055,8 @@ st.markdown(
         width: 100%;
         max-width: 100%;
         height: 100%;
-        min-height: 270px;
-        max-height: 360px;
+        min-height: 285px;
+        max-height: 375px;
         object-fit: contain;
         display: block;
     }
@@ -3621,24 +3675,27 @@ def _render_position_block_slicer(
     selected: set[str] = set(st.session_state[state_key])
     st.markdown('<p class="pa-position-block-label">Posição</p>', unsafe_allow_html=True)
     block_cols = st.columns(len(blocks))
+    new_selected: set[str] = set()
     for col, (block_id, label, _codes, _rating_group) in zip(block_cols, blocks):
         with col:
-            is_selected = block_id in selected
-            if st.button(
+            is_checked = st.checkbox(
                 label,
-                key=f"{key_prefix}_pos_block_{block_id}",
-                type="primary" if is_selected else "secondary",
-                use_container_width=True,
-            ):
-                st.session_state[state_key] = {block_id}
-                if state_key == PLAYER_ANALYSIS_POSITION_BLOCKS_KEY:
-                    st.session_state.pop(PLAYER_ANALYSIS_SELECT_KEY, None)
-                    _clear_player_select_widgets()
-                    st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
-                st.rerun()
+                value=block_id in selected,
+                key=f"{key_prefix}_pos_cb_{block_id}",
+            )
+            if is_checked:
+                new_selected.add(block_id)
+
+    if new_selected != selected:
+        st.session_state[state_key] = new_selected
+        if state_key == PLAYER_ANALYSIS_POSITION_BLOCKS_KEY:
+            st.session_state.pop(PLAYER_ANALYSIS_SELECT_KEY, None)
+            _clear_player_select_widgets()
+            st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
+        st.rerun()
 
     lookup = block_map or PLAYER_POSITION_BLOCK_BY_ID
-    return _position_filter_from_blocks(selected, block_map=lookup)
+    return _position_filter_from_blocks(new_selected, block_map=lookup)
 
 
 def _player_select_widget_key(key_prefix: str) -> str:
@@ -3737,7 +3794,7 @@ def _render_shared_player_slicers(
         with player_col:
             with st.container(key=f"{key_prefix}_player_slicer"):
                 if not position_codes and not position_groups:
-                    st.info("Selecione uma posição para filtrar jogadores.")
+                    st.info("Selecione pelo menos uma posição para filtrar jogadores.")
                     st.markdown("</div>", unsafe_allow_html=True)
                     return None
                 options = _player_analysis_options(
@@ -4937,7 +4994,7 @@ def _xp_archetype_radar_b64(xp_profile: dict | None) -> str:
     angles_closed = np.append(angles, angles[0])
 
     fig, ax = plt.subplots(
-        figsize=(5.0, 5.0),
+        figsize=(5.25, 5.25),
         subplot_kw={"polar": True},
         facecolor="none",
     )
@@ -4971,8 +5028,8 @@ def _xp_archetype_radar_b64(xp_profile: dict | None) -> str:
     ax.set_yticks([4, 5, 6, 7, 8])
     ax.set_yticklabels([])
     ax.set_xticks(angles)
-    ax.set_xticklabels(labels, fontsize=8.5, fontweight=600, linespacing=0.9, color="#e2e8f0")
-    ax.tick_params(axis="x", pad=16)
+    ax.set_xticklabels(labels, fontsize=10.5, fontweight=600, linespacing=0.9, color="#e2e8f0")
+    ax.tick_params(axis="x", pad=18)
     ax.grid(color="#334155", alpha=0.42, linewidth=0.65)
     ax.spines["polar"].set_color("#334155")
     ax.spines["polar"].set_alpha(0.55)
@@ -6490,7 +6547,7 @@ def render_scatter_section(
         )
 
     if not position_codes and not position_groups:
-        st.info("Selecione uma posição para ver o gráfico.")
+        st.info("Selecione pelo menos uma posição para ver o gráfico.")
         return
 
     metric_options = xstats.iter_scatter_base_metric_options()
