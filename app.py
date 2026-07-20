@@ -162,6 +162,7 @@ PLAYER_ANALYSIS_SHOW_SIMILAR_KEY = "pa_show_similar"
 PLAYER_ANALYSIS_SIMILAR_PICK_KEY = "pa_similar_pick"
 PLAYER_ANALYSIS_COMPARE_KEY = "pa_compare_select"
 PLAYER_ANALYSIS_POSITION_BLOCKS_KEY = "pa_position_blocks"
+STATS_POSITION_BLOCKS_KEY = "stats_position_blocks"
 PA_URL_PLAYER_KEY = "_pa_url_player_id"
 PA_USER_PLAYER_PICK_KEY = "_pa_user_player_pick"
 PA_USER_POSITION_PICK_KEY = "_pa_user_position_pick"
@@ -3802,6 +3803,20 @@ def _coerce_position_block_id(
     return block_id
 
 
+def _position_blocks_state_key(key_prefix: str) -> str:
+    if key_prefix == "pa":
+        return PLAYER_ANALYSIS_POSITION_BLOCKS_KEY
+    if key_prefix == "stats":
+        return STATS_POSITION_BLOCKS_KEY
+    return f"{key_prefix}_position_blocks"
+
+
+def _player_map_id_key(key_prefix: str) -> str:
+    if key_prefix in {"pa", "maps"}:
+        return "map_player_id"
+    return f"{key_prefix}_map_player_id"
+
+
 def _position_select_widget_key(key_prefix: str) -> str:
     return f"{key_prefix}_position_select"
 
@@ -3844,7 +3859,7 @@ def _prepare_position_block_widget_state(
 
 def _clear_position_block_player_selection() -> None:
     st.session_state.pop(PLAYER_ANALYSIS_SELECT_KEY, None)
-    _clear_player_select_widgets()
+    _clear_player_select_widgets(key_prefix="pa")
     st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
 
 
@@ -3943,21 +3958,22 @@ def _sync_player_select_from_map_id(
     *,
     key_prefix: str,
 ) -> None:
-    if st.session_state.get(PA_USER_PLAYER_PICK_KEY):
+    if key_prefix == "pa" and st.session_state.get(PA_USER_PLAYER_PICK_KEY):
         return
     select_key = _player_select_widget_key(key_prefix)
-    map_id = st.session_state.get("map_player_id")
+    map_id = st.session_state.get(_player_map_id_key(key_prefix))
     if map_id and str(map_id) in label_by_id:
         mapped_label = label_by_id[str(map_id)]
         if mapped_label in labels:
             st.session_state[select_key] = mapped_label
 
 
-def _clear_player_select_widgets() -> None:
-    for key in list(st.session_state.keys()):
-        if key == PLAYER_ANALYSIS_SELECT_KEY or key.endswith(f"_{PLAYER_ANALYSIS_SELECT_KEY}"):
-            st.session_state.pop(key, None)
-    st.session_state.pop("map_player_id", None)
+def _clear_player_select_widgets(*, key_prefix: str = "pa") -> None:
+    select_key = _player_select_widget_key(key_prefix)
+    st.session_state.pop(select_key, None)
+    if key_prefix == "pa":
+        st.session_state.pop(PLAYER_ANALYSIS_SELECT_KEY, None)
+    st.session_state.pop(_player_map_id_key(key_prefix), None)
 
 
 def _player_analysis_options(
@@ -4022,15 +4038,21 @@ def _render_shared_player_slicers(
     *,
     xp_by_id: dict[str, dict] | None = None,
     key_prefix: str = "pa",
+    state_key: str | None = None,
     sort_by: str = "xp_pass_rating",
 ) -> str | None:
     """Position block slicer + player selectbox. Returns selected player_id or None."""
+    blocks_state_key = state_key or _position_blocks_state_key(key_prefix)
+    map_id_key = _player_map_id_key(key_prefix)
     with st.container():
         st.markdown('<div class="pa-slicer-panel">', unsafe_allow_html=True)
         pos_col, player_col = st.columns([1, 1], gap="medium")
         with pos_col:
             with st.container(key=f"{key_prefix}_position_slicer"):
-                position_codes, position_groups = _render_position_block_slicer(key_prefix=key_prefix)
+                position_codes, position_groups = _render_position_block_slicer(
+                    key_prefix=key_prefix,
+                    state_key=blocks_state_key,
+                )
         selected_label = None
         with player_col:
             with st.container(key=f"{key_prefix}_player_slicer"):
@@ -4079,10 +4101,13 @@ def _render_shared_player_slicers(
         return None
 
     player_id = id_by_label[selected_label]
-    prev_id = st.session_state.get("map_player_id")
-    st.session_state["map_player_id"] = player_id
+    prev_id = st.session_state.get(map_id_key)
+    st.session_state[map_id_key] = player_id
+    if key_prefix == "pa":
+        st.session_state["map_player_id"] = player_id
     if prev_id != player_id:
-        _mark_user_player_pick()
+        if key_prefix == "pa":
+            _mark_user_player_pick()
         st.session_state["pa_last_player_id"] = player_id
         st.session_state.pop(PLAYER_ANALYSIS_SIMILAR_PICK_KEY, None)
         st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
@@ -6346,6 +6371,8 @@ def _sync_player_analysis_selection(
     key_prefix: str = "pa",
 ) -> None:
     """Sync slicer from URL deep-links only until the user picks position/player manually."""
+    if key_prefix not in {"pa", "maps"}:
+        return
     qp = st.query_params.get("player_id")
     qp_id = str(qp) if qp else None
     if not qp_id or qp_id not in players_by_id:
@@ -7014,6 +7041,7 @@ def render_stats_section(
         players_by_id,
         xp_by_id=xp_by_id,
         key_prefix="stats",
+        state_key=STATS_POSITION_BLOCKS_KEY,
     )
     if not player_id:
         return
