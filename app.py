@@ -3814,6 +3814,37 @@ def _read_position_block_state(
     return _coerce_position_block_id(st.session_state.get(state_key), blocks)
 
 
+def _prepare_position_block_widget_state(
+    *,
+    state_key: str,
+    widget_key: str,
+    blocks: tuple[tuple[str, str, frozenset[str] | None, str | None], ...],
+) -> tuple[str, bool]:
+    """Coerce canonical + widget values; migrate legacy rb/lb/rw/lw ids."""
+    if state_key not in st.session_state and widget_key in st.session_state:
+        st.session_state[state_key] = st.session_state[widget_key]
+
+    canonical_block = _read_position_block_state(state_key, blocks)
+    st.session_state[state_key] = canonical_block
+
+    widget_migrated = False
+    if widget_key in st.session_state:
+        widget_block = _coerce_position_block_id(st.session_state.get(widget_key), blocks)
+        if widget_block != st.session_state[widget_key]:
+            st.session_state[widget_key] = widget_block
+            widget_migrated = True
+    else:
+        st.session_state[widget_key] = canonical_block
+
+    return canonical_block, widget_migrated
+
+
+def _clear_position_block_player_selection() -> None:
+    st.session_state.pop(PLAYER_ANALYSIS_SELECT_KEY, None)
+    _clear_player_select_widgets()
+    st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
+
+
 def _sync_position_block_state(
     block_id: str,
     *,
@@ -3838,14 +3869,19 @@ def _render_position_block_slicer(
     labels_by_id = {block_id: label for block_id, label, *_rest in blocks}
     widget_key = _position_select_widget_key(key_prefix)
 
-    st.session_state[state_key] = _read_position_block_state(state_key, blocks)
-    canonical_block = st.session_state[state_key]
-
-    if widget_key not in st.session_state:
-        st.session_state[widget_key] = canonical_block
+    canonical_block, widget_migrated = _prepare_position_block_widget_state(
+        state_key=state_key,
+        widget_key=widget_key,
+        blocks=blocks,
+    )
 
     prev_key = _position_block_prev_key(state_key)
-    previous_block = st.session_state.get(prev_key)
+    raw_previous_block = st.session_state.get(prev_key)
+    previous_block = (
+        _coerce_position_block_id(raw_previous_block, blocks)
+        if raw_previous_block is not None
+        else None
+    )
 
     selected_block = st.selectbox(
         "Posição",
@@ -3853,15 +3889,17 @@ def _render_position_block_slicer(
         format_func=lambda block_id: labels_by_id.get(block_id, block_id),
         key=widget_key,
     )
+    selected_block = _coerce_position_block_id(selected_block, blocks)
 
     if selected_block != canonical_block:
         st.session_state[state_key] = selected_block
 
-    if previous_block is not None and previous_block != selected_block:
-        if state_key == PLAYER_ANALYSIS_POSITION_BLOCKS_KEY:
-            st.session_state.pop(PLAYER_ANALYSIS_SELECT_KEY, None)
-            _clear_player_select_widgets()
-            st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
+    position_changed = (
+        widget_migrated
+        or (previous_block is not None and previous_block != selected_block)
+    )
+    if position_changed and state_key == PLAYER_ANALYSIS_POSITION_BLOCKS_KEY:
+        _clear_position_block_player_selection()
 
     st.session_state[prev_key] = selected_block
 
