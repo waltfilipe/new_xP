@@ -461,25 +461,51 @@ XP_ARCHETYPE_RADAR_LABELS: dict[str, str] = {
 }
 
 XP_PROFILE_BAR_KEYS: tuple[str, ...] = (
+    "xp_activity_display",
+    "xp_edge_display",
     "xp_quality_display",
     "xp_consistency_display",
 )
 
 XP_PROFILE_BAR_LABELS: dict[str, str] = {
+    "xp_activity_display": "Activity",
+    "xp_edge_display": "Edge",
     "xp_quality_display": "Quality",
     "xp_consistency_display": "Consistency",
 }
 
 XP_PROFILE_BAR_METRICS: dict[str, tuple[str, ...]] = {
+    "xp_activity_display": (
+        "xp_per_90",
+        "threat_passes_p90",
+    ),
+    "xp_edge_display": (
+        "xp_m4_per_pass",
+        "xp_m4_per_threat_pass",
+    ),
     "xp_quality_display": (
         "xp_residual_median",
-        "xp_surprise_rate",
     ),
     "xp_consistency_display": (
         "xp_game_std_adj_score",
-        "xp_games_above_median_pct",
     ),
 }
+
+XP_PROFILE_BAR_TOOLTIPS: dict[str, str] = {
+    "xp_activity_display": "Mediana do rank na posição entre xP/jogo e threats/jogo.",
+    "xp_edge_display": "Mediana do rank na posição entre xP/passe e xP/threat.",
+    "xp_quality_display": "Resíduo mediano por passe (xP real − esperado).",
+    "xp_consistency_display": "Estabilidade de xP entre jogos, ajustada pelo nível médio.",
+}
+
+ACTIVITY_METRICS: tuple[str, ...] = (
+    "xp_per_90",
+    "threat_passes_p90",
+)
+EDGE_METRICS: tuple[str, ...] = (
+    "xp_m4_per_pass",
+    "xp_m4_per_threat_pass",
+)
 
 XP_PASS_RATING_FEATURES: tuple[str, ...] = (
     "xp_m4_per_pass",
@@ -522,11 +548,8 @@ FINISHER_METRICS: tuple[str, ...] = (
 )
 QUALITY_METRICS: tuple[str, ...] = (
     "xp_residual_median",
-    "xp_surprise_rate",
 )
 CONSISTENCY_METRICS: tuple[str, ...] = (
-    "xp_game_mean",
-    "xp_games_above_median_pct",
     "xp_game_std_adj_score",
 )
 CONSISTENCY_INVERT_METRICS: tuple[str, ...] = ()
@@ -863,6 +886,26 @@ def _attach_index_display_scores(
         row[display_key] = float(pe.rank_to_display_score(rank, pool_size))
 
 
+def _attach_median_rank_display_scores(
+    rows: list[dict],
+    cols: tuple[str, ...],
+    raw_key: str,
+    display_key: str,
+) -> None:
+    """Rank each metric within position, take the median rank, then map to 3–9 display."""
+    if not rows or not cols:
+        return
+    df = pd.DataFrame(rows)
+    pool_size = len(rows)
+    rank_frame = pd.concat(
+        [_rank_descending(_series_or_zero(df, col).astype(float)) for col in cols],
+        axis=1,
+    )
+    median_rank = rank_frame.median(axis=1).astype(float)
+    composite = float(pool_size + 1) - median_rank
+    _attach_index_display_scores(rows, raw_key, display_key, composite)
+
+
 def _attach_game_std_adjusted(rows: list[dict]) -> None:
     """Residual of game-level xP std after regressing on game mean (within position)."""
     if not rows:
@@ -916,6 +959,13 @@ def attach_composite_indices(players: list[dict]) -> None:
         }
         for raw_key, composite in composites.items():
             _attach_index_display_scores(rows, raw_key, display_map[raw_key], composite)
+
+        _attach_median_rank_display_scores(
+            rows, ACTIVITY_METRICS, "xp_activity_index", "xp_activity_display"
+        )
+        _attach_median_rank_display_scores(
+            rows, EDGE_METRICS, "xp_edge_index", "xp_edge_display"
+        )
 
 
 def _xp_pass_rating_shrink_sample(feature_key: str, player: dict) -> float:

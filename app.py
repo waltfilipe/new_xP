@@ -2568,9 +2568,10 @@ st.markdown(
         flex-direction: column;
         flex: 1;
         min-height: 0;
-        padding: 0.5rem 0.65rem 0.65rem;
+        padding: 0.55rem 0.65rem 0.7rem;
         margin-bottom: 0;
-        gap: 0.2rem;
+        gap: 0.35rem;
+        overflow: visible;
     }
     .pa-xp-profile-title {
         margin: 0;
@@ -2855,12 +2856,13 @@ st.markdown(
         gap: 0.35rem;
     }
     .pa-pass-grade-card {
-        padding: 0.85rem 0.95rem 0.9rem;
+        padding: 0.8rem 0.85rem 0.95rem;
         margin-bottom: 0;
         flex-shrink: 0;
         display: flex;
         flex-direction: column;
-        gap: 0.62rem;
+        gap: 0.55rem;
+        overflow: visible;
     }
     .pa-pass-grade-title {
         margin: 0;
@@ -2872,7 +2874,8 @@ st.markdown(
     }
     .pa-pass-grade-shell {
         position: relative;
-        padding: 0.15rem 0 1.55rem;
+        padding: 0.2rem 1.15rem 2.15rem;
+        overflow: visible;
     }
     .pa-pass-grade-track {
         position: relative;
@@ -2909,24 +2912,26 @@ st.markdown(
     }
     .pa-pass-grade-chip-wrap {
         position: absolute;
-        top: 1.05rem;
+        top: 1.1rem;
         transform: translateX(-50%);
         z-index: 2;
+        max-width: calc(100% - 0.5rem);
     }
     .pa-pass-grade-chip {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-width: 3.15rem;
-        padding: 0.34rem 0.72rem;
+        min-width: 3rem;
+        padding: 0.36rem 0.68rem;
         border-radius: 10px;
-        font-size: 1.28rem;
+        font-size: 1.22rem;
         font-weight: 800;
         letter-spacing: 0.01em;
         color: #f8fafc;
         border: 1px solid rgba(255, 255, 255, 0.16);
         box-shadow: 0 8px 18px rgba(15, 23, 42, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.12);
         background: linear-gradient(160deg, rgba(30, 41, 59, 0.92) 0%, rgba(15, 23, 42, 0.96) 100%);
+        white-space: nowrap;
     }
     .pa-pass-grade-chip.pa-pass-grade-low-sample {
         opacity: 0.82;
@@ -3160,9 +3165,11 @@ st.markdown(
     .pa-xp-profile-bars {
         display: flex;
         flex-direction: column;
-        gap: 0.62rem;
-        padding-top: 0.2rem;
-        flex-shrink: 0;
+        gap: 0.55rem;
+        padding-top: 0.15rem;
+        flex: 1;
+        justify-content: space-evenly;
+        min-height: 0;
     }
     .pa-xp-gradient-bar-row {
         display: flex;
@@ -4742,6 +4749,7 @@ def _player_analysis_pass_grade_panel_html(
     )
     chip_bg = _pass_grade_gradient_color(pct)
     chip_txt = _badge_text_color(chip_bg)
+    chip_pct = max(14.0, min(86.0, pct))
     return (
         '<div class="player-card pa-pass-grade-card">'
         '<p class="pa-pass-grade-title">Overall Pass Grade</p>'
@@ -4749,7 +4757,7 @@ def _player_analysis_pass_grade_panel_html(
         '<div class="pa-pass-grade-track">'
         f'<span class="pa-pass-grade-glow" style="left:{pct:.1f}%"></span>'
         "</div>"
-        f'<div class="pa-pass-grade-chip-wrap" style="left:{pct:.1f}%">'
+        f'<div class="pa-pass-grade-chip-wrap" style="left:{chip_pct:.1f}%">'
         f'<span class="pa-pass-grade-chip{low_cls}" '
         f'style="background:{chip_bg};color:{chip_txt}">{score_txt}</span>'
         "</div>"
@@ -5275,15 +5283,22 @@ def _xp_gradient_bar_tier(pct: float) -> str:
 def _xp_gradient_bar_tooltip_html(xp_profile: dict, display_key: str) -> str:
     title = xstats.XP_PROFILE_BAR_LABELS.get(display_key, display_key)
     metric_keys = xstats.XP_PROFILE_BAR_METRICS.get(display_key, ())
+    summary = xstats.XP_PROFILE_BAR_TOOLTIPS.get(display_key, "")
     lines = "".join(
         '<span class="pa-xp-gradient-bar-tip-line">'
         f'{html.escape(xstats.stats_metric_label(key))}: '
-        f'{html.escape(xstats.format_stats_value(key, xp_profile.get(key)))}'
+        f'{html.escape(xstats.format_pa_stats_value(key, xp_profile.get(key)))}'
         "</span>"
         for key in metric_keys
     )
+    summary_html = (
+        f'<span class="pa-xp-gradient-bar-tip-summary">{html.escape(summary)}</span>'
+        if summary
+        else ""
+    )
     return (
         f'<span class="pa-xp-gradient-bar-tip-title">{html.escape(title)}</span>'
+        f"{summary_html}"
         f"{lines}"
     )
 
@@ -5350,18 +5365,10 @@ def _xp_profile_bars_html(xp_profile: dict | None) -> str:
 def _xp_profile_score_column_html(xp_profile: dict | None) -> str:
     if not xp_profile:
         return ""
-    radar_b64 = _xp_archetype_radar_b64(xp_profile)
-    radar_img = (
-        f'<img class="pa-xp-radar-img" src="data:image/png;base64,{radar_b64}" '
-        'alt="xP archetype radar" />'
-        if radar_b64
-        else '<p class="pa-placeholder-note">Radar indisponível</p>'
-    )
     bars_html = _xp_profile_bars_html(xp_profile)
     return (
         '<div class="player-card pa-xp-profile-card">'
         '<p class="pa-xp-profile-title">xP Profile</p>'
-        f'<div class="pa-xp-radar-wrap">{radar_img}</div>'
         f"{bars_html}"
         "</div>"
     )
@@ -5546,13 +5553,9 @@ def _build_xp_stats_card_html(
         _pa_xp_section_panel_html(profile, section_title, keys)
         for section_title, keys in xstats.XP_PLAYER_ANALYSIS_BLOCKS
     )
-    passing_html = (
-        '<p class="pa-pillar-group-label">Passing</p>'
-        f'<div class="pa-pillar-group">{passing_sections}</div>'
-    )
     return (
         '<div class="player-card pa-pillars-card">'
-        f'<div class="pa-pillars-stack">{passing_html}</div>'
+        f'<div class="pa-pillars-stack"><div class="pa-pillar-group">{passing_sections}</div></div>'
         "</div>"
     )
 
