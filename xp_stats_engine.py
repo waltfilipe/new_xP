@@ -498,6 +498,61 @@ XP_PROFILE_BAR_TOOLTIPS: dict[str, str] = {
     "xp_consistency_display": "Estabilidade de xP entre jogos, ajustada pelo nível médio.",
 }
 
+XP_PROFILE_ARCHETYPE_KEYS: tuple[str, ...] = (
+    "elite",
+    "seguranca",
+    "criativo",
+    "regular",
+    "limitado",
+)
+
+XP_PROFILE_ARCHETYPE_LABELS: dict[str, str] = {
+    "elite": "Elite",
+    "seguranca": "Segurança",
+    "criativo": "Criativo",
+    "regular": "Regular",
+    "limitado": "Limitado",
+}
+
+XP_PROFILE_ARCHETYPE_DESCRIPTIONS: dict[str, str] = {
+    "elite": (
+        "Perfil completo com motor de elite: volume e efetividade acima da mediana na posição, "
+        "com qualidade ou consistência também acima da mediana."
+    ),
+    "seguranca": (
+        "Perfil de segurança: volume e consistência acima da mediana — confiável, discreto "
+        "e preciso/estável no passe."
+    ),
+    "criativo": (
+        "Perfil criativo: efetividade acima da mediana com qualidade elevada ou consistência "
+        "mais volátil (especialista técnico / gambler)."
+    ),
+    "regular": (
+        "Perfil equilibrado na posição, sem destaque claro em volume, efetividade, qualidade "
+        "ou consistência."
+    ),
+    "limitado": (
+        "Baixo impacto relativo na posição: três ou quatro eixos do xP Profile abaixo da "
+        "mediana do grupo."
+    ),
+}
+
+XP_PROFILE_ARCHETYPE_STYLES: dict[str, str] = {
+    "elite": "elite",
+    "seguranca": "build",
+    "criativo": "attack",
+    "regular": "link",
+    "limitado": "reference",
+}
+
+XP_PROFILE_ARCHETYPE_ICONS: dict[str, str] = {
+    "elite": "fa-crown",
+    "seguranca": "fa-shield-halved",
+    "criativo": "fa-wand-magic-sparkles",
+    "regular": "fa-equals",
+    "limitado": "fa-arrow-trend-down",
+}
+
 ACTIVITY_METRICS: tuple[str, ...] = (
     "xp_per_90",
     "threat_passes_p90",
@@ -924,6 +979,60 @@ def _attach_game_std_adjusted(rows: list[dict]) -> None:
         row["xp_game_std_adj_score"] = float(-val)
 
 
+def _xp_profile_axis_medians(rows: list[dict]) -> dict[str, float]:
+    medians: dict[str, float] = {}
+    for key in XP_PROFILE_BAR_KEYS:
+        values = [
+            float(row[key])
+            for row in rows
+            if row.get(key) is not None and np.isfinite(float(row[key]))
+        ]
+        medians[key] = float(np.median(values)) if values else 6.0
+    return medians
+
+
+def classify_xp_profile_archetype(
+    row: dict,
+    medians: dict[str, float],
+) -> str:
+    """Classify a player into one of five xP profile archetypes (within position)."""
+    scores: dict[str, float] = {}
+    for key in XP_PROFILE_BAR_KEYS:
+        raw = row.get(key)
+        if raw is None or not np.isfinite(float(raw)):
+            return "regular"
+        scores[key] = float(raw)
+
+    below = {key: scores[key] < medians[key] for key in XP_PROFILE_BAR_KEYS}
+    above = {key: scores[key] > medians[key] for key in XP_PROFILE_BAR_KEYS}
+
+    volume = "xp_activity_display"
+    effectiveness = "xp_edge_display"
+    quality = "xp_quality_display"
+    consistency = "xp_consistency_display"
+
+    if above[volume] and above[effectiveness] and (above[quality] or above[consistency]):
+        return "elite"
+    if above[volume] and above[consistency]:
+        return "seguranca"
+    if above[effectiveness] and (above[quality] or below[consistency]):
+        return "criativo"
+    if sum(below.values()) >= 3:
+        return "limitado"
+    return "regular"
+
+
+def _attach_xp_profile_archetypes(rows: list[dict]) -> None:
+    if not rows:
+        return
+    medians = _xp_profile_axis_medians(rows)
+    for row in rows:
+        archetype = classify_xp_profile_archetype(row, medians)
+        row["xp_profile_archetype"] = archetype
+        row["xp_profile_archetype_label"] = XP_PROFILE_ARCHETYPE_LABELS[archetype]
+        row["xp_profile_archetype_description"] = XP_PROFILE_ARCHETYPE_DESCRIPTIONS[archetype]
+
+
 def attach_composite_indices(players: list[dict]) -> None:
     """Within-position z-score composites for xP archetype radar and profile bars."""
     if not players:
@@ -966,6 +1075,7 @@ def attach_composite_indices(players: list[dict]) -> None:
         _attach_median_rank_display_scores(
             rows, EDGE_METRICS, "xp_edge_index", "xp_edge_display"
         )
+        _attach_xp_profile_archetypes(rows)
 
 
 def _xp_pass_rating_shrink_sample(feature_key: str, player: dict) -> float:

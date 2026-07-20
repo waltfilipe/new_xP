@@ -2756,6 +2756,25 @@ st.markdown(
         background: rgba(51, 65, 85, 0.28);
         border-color: rgba(100, 116, 139, 0.45);
     }
+    .pa-archetype-elite {
+        color: #fde68a;
+        background: rgba(202, 138, 4, 0.18);
+        border-color: rgba(250, 204, 21, 0.5);
+    }
+    .pa-xp-profile-archetype {
+        display: flex;
+        justify-content: center;
+        margin-top: 0.15rem;
+        padding-top: 0.2rem;
+        flex-shrink: 0;
+    }
+    .pa-xp-profile-archetype .pa-archetype-tipbox {
+        left: 50%;
+        transform: translateX(-50%);
+        min-width: 14rem;
+        max-width: 18rem;
+        text-align: left;
+    }
     .pa-archetype-tipbox {
         display: none;
         position: absolute;
@@ -5255,6 +5274,7 @@ _ARCHETYPE_STYLE_CLASS: dict[str, str] = {
     "attack": "pa-archetype-attack",
     "link": "pa-archetype-link",
     "reference": "pa-archetype-reference",
+    "elite": "pa-archetype-elite",
 }
 
 
@@ -5459,14 +5479,46 @@ def _xp_profile_bars_html(xp_profile: dict | None) -> str:
     return f'<div class="pa-xp-profile-bars">{rows}</div>'
 
 
+def _xp_profile_archetype_html(xp_profile: dict | None) -> str:
+    if not xp_profile:
+        return ""
+    archetype = xp_profile.get("xp_profile_archetype")
+    if not archetype:
+        return ""
+    label = str(
+        xp_profile.get("xp_profile_archetype_label")
+        or xstats.XP_PROFILE_ARCHETYPE_LABELS.get(str(archetype), archetype)
+    )
+    description = str(
+        xp_profile.get("xp_profile_archetype_description")
+        or xstats.XP_PROFILE_ARCHETYPE_DESCRIPTIONS.get(str(archetype), "")
+    )
+    style = xstats.XP_PROFILE_ARCHETYPE_STYLES.get(str(archetype), "link")
+    style_class = _ARCHETYPE_STYLE_CLASS.get(style, "pa-archetype-link")
+    icon = xstats.XP_PROFILE_ARCHETYPE_ICONS.get(str(archetype), "fa-chart-pie")
+    return (
+        '<div class="pa-xp-profile-archetype">'
+        '<span class="pa-archetype-tip">'
+        f'<span class="pa-archetype-pill {style_class}">'
+        f'<i class="fa-solid {html.escape(icon)}" aria-hidden="true"></i>'
+        f"{html.escape(label)}"
+        "</span>"
+        f'<span class="pa-archetype-tipbox">{html.escape(description)}</span>'
+        "</span>"
+        "</div>"
+    )
+
+
 def _xp_profile_score_column_html(xp_profile: dict | None) -> str:
     if not xp_profile:
         return ""
     bars_html = _xp_profile_bars_html(xp_profile)
+    archetype_html = _xp_profile_archetype_html(xp_profile)
     return (
         '<div class="player-card pa-xp-profile-card">'
         '<p class="pa-xp-profile-title">xP Profile</p>'
         f"{bars_html}"
+        f"{archetype_html}"
         "</div>"
     )
 
