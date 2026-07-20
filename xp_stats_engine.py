@@ -171,6 +171,17 @@ def special_pass_per_game_key(filter_key: str) -> str:
     return f"special_{filter_key}_p90"
 
 
+THREAT_ZONE_FILTER_KEYS: tuple[str, ...] = ("final_third", "in_box", "from_deep")
+
+
+def threat_zone_count_key(filter_key: str) -> str:
+    return f"threat_{filter_key}_passes"
+
+
+def threat_zone_per_game_key(filter_key: str) -> str:
+    return f"threat_{filter_key}_p90"
+
+
 def _completed_pass_frame(passes: pd.DataFrame) -> pd.DataFrame:
     if passes is None or passes.empty:
         return pd.DataFrame()
@@ -296,6 +307,8 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
         "xp_pass_std": float(xp.std()) if n > 1 else 0.0,
         "xp_pass_cv": float(xp.std() / xp.mean()) if n > 1 and xp.mean() > 0 else 0.0,
     })
+    for zone_key in THREAT_ZONE_FILTER_KEYS:
+        out[threat_zone_count_key(zone_key)] = int((masks[zone_key] & threat).sum())
 
     if RESIDUAL_COL in scored.columns:
         residual = scored[RESIDUAL_COL].to_numpy(dtype=float)
@@ -347,6 +360,8 @@ def apply_per90_metrics(metrics: dict[str, float | int], minutes: float | None) 
         metrics["xp_per_90"] = 0.0
         for sp_key in SPECIAL_PASS_COUNT_KEYS:
             metrics[special_pass_per_game_key(sp_key)] = 0.0
+        for zone_key in THREAT_ZONE_FILTER_KEYS:
+            metrics[threat_zone_per_game_key(zone_key)] = 0.0
         return
     mins_f = float(minutes)
     factor = 90.0 / mins_f
@@ -359,36 +374,36 @@ def apply_per90_metrics(metrics: dict[str, float | int], minutes: float | None) 
     for sp_key in SPECIAL_PASS_COUNT_KEYS:
         count = int(metrics.get(special_pass_count_key(sp_key), 0))
         metrics[special_pass_per_game_key(sp_key)] = float(count) * factor
+    for zone_key in THREAT_ZONE_FILTER_KEYS:
+        count = int(metrics.get(threat_zone_count_key(zone_key), 0))
+        metrics[threat_zone_per_game_key(zone_key)] = float(count) * factor
 
 
 # (section_title, metric_keys)
 XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Total", (
+    ("Totais", (
         "xp_per_90", "xp_m4_per_pass", "xp_m4_threat_rate",
+    )),
+    ("Special Stats", (
+        "special_diagonal_long_p90", "xp_diagonal_long_total",
+        "special_line_break_p90", "xp_line_break_total",
+        "special_inversion_p90", "xp_inversion_total",
+        "special_cross_p90", "xp_cross_total",
+        "xp_final_third_share", "threat_final_third_p90",
+        "xp_box_share", "threat_in_box_p90",
+        "xp_from_deep", "threat_from_deep_p90",
+    )),
+    ("Qualidade", (
+        "xp_residual_mean", "xp_residual_positive", "xp_surprise_rate",
+    )),
+    ("Consistência", (
+        "xp_game_mean", "xp_game_std", "xp_games_above_median_pct",
     )),
     (f"Short ({DISTANCE_BAND_LABELS['short']})", (
         "xp_m4_per_pass_short", "xp_m4_threat_rate_short",
     )),
     (f"Long ({DISTANCE_BAND_LABELS['long']})", (
         "xp_m4_per_pass_long", "xp_m4_threat_rate_long",
-    )),
-    ("SPECIAL PASSES", (
-        "xp_diagonal_long_total", "special_diagonal_long_p90",
-        "xp_line_break_total", "special_line_break_p90",
-        "xp_inversion_total", "special_inversion_p90",
-        "xp_cross_total", "special_cross_p90",
-        "xp_final_third_share", "special_final_third_p90",
-        "xp_box_share", "special_in_box_p90",
-        "xp_from_deep", "special_from_deep_p90",
-    )),
-    ("Qualidade e threat", (
-        "xp_residual_mean", "xp_residual_positive", "xp_residual_negative", "xp_surprise_rate",
-        "xp_threat_conversion", "xp_threat_mean_xp", "xp_threat_mean_residual",
-        "xp_m4_p90", "xp_max_pass",
-    )),
-    ("Consistência", (
-        "xp_game_mean", "xp_game_std", "xp_pass_cv",
-        "xp_games_above_median_pct", "xp_pass_std",
     )),
 )
 
@@ -441,31 +456,34 @@ XP_STATS_LABELS: dict[str, str] = {
     "xp_m4_threat_long_p90": "Threat p/game (Long)",
     "xp_diagonal_long_total": "Diagonal Longa (xP)",
     "special_diagonal_long_p90": "Diagonal Longa (Per game)",
-    "xp_line_break_total": "Quebra linha (xP)",
-    "special_line_break_p90": "Quebra linha (Per game)",
+    "xp_line_break_total": "Quebra Linha (xP)",
+    "special_line_break_p90": "Quebra Linha (Per game)",
     "xp_inversion_total": "Inversões (xP)",
     "special_inversion_p90": "Inversões (Per game)",
-    "xp_cross_total": "Cruzamento (xP)",
-    "special_cross_p90": "Cruzamento (Per game)",
-    "xp_final_third_share": "% xP no terço final",
+    "xp_cross_total": "Cruzamentos (xP)",
+    "special_cross_p90": "Cruzamentos (Per game)",
+    "xp_final_third_share": "%xP - Terço Final",
+    "threat_final_third_p90": "Threat Passes - Terço Final",
+    "xp_box_share": "%xP - Área",
+    "threat_in_box_p90": "Threat Passes - Área",
+    "xp_from_deep": "xP Deep",
+    "threat_from_deep_p90": "Threat Passes - Deep",
     "special_final_third_p90": "Terço final (Per game)",
-    "xp_box_share": "% xP na área",
     "special_in_box_p90": "Na área (Per game)",
-    "xp_from_deep": "xP from deep",
     "special_from_deep_p90": "From deep (Per game)",
-    "xp_residual_mean": "Resíduo médio / passe",
-    "xp_residual_positive": "xP acima do esperado / passe",
+    "xp_residual_mean": "Resíduo médio/Passe",
+    "xp_residual_positive": "xP acima do esperado/Passe",
     "xp_residual_negative": "xP abaixo do esperado / passe",
-    "xp_surprise_rate": "Surprise rate",
+    "xp_surprise_rate": "Surprise Rate",
     "xp_threat_conversion": "Threat conversion",
     "xp_threat_mean_xp": "Mean threat xP",
     "xp_threat_mean_residual": "Mean threat residual",
     "xp_m4_p90": "xP P90 (passe)",
     "xp_max_pass": "Max single-pass xP",
-    "xp_game_mean": "xP médio por jogo",
-    "xp_game_std": "Desvio xP entre jogos",
+    "xp_game_mean": "xP médio (Per game)",
+    "xp_game_std": "Desvio xP",
     "xp_pass_cv": "xP CV (passes)",
-    "xp_games_above_median_pct": "% jogos acima da mediana",
+    "xp_games_above_median_pct": "% Jogos acima da mediana",
     "xp_pass_std": "Desvio xP (passes)",
 }
 
