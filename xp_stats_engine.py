@@ -427,11 +427,11 @@ XP_PLAYER_ANALYSIS_BLOCKS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "xp_m4_per_threat_pass",
         "xp_m4_threat_rate",
     )),
-    ("Quality", (
+    ("Qualidade", (
         "xp_residual_median",
         "xp_surprise_rate",
     )),
-    ("Consistency", (
+    ("Consistência", (
         "xp_game_std_adj_score",
         "xp_games_above_median_pct",
     )),
@@ -629,6 +629,30 @@ XP_STATS_LABELS: dict[str, str] = {
     "xp_archetype_finisher_display": "Finisher-pass",
     "xp_quality_display": "Quality",
     "xp_consistency_display": "Consistency",
+}
+
+XP_PA_LABELS: dict[str, str] = {
+    "xp_per_90": "xP / jogo",
+    "threat_passes_p90": "Threats / jogo",
+    "xp_m4_per_pass": "xP / passe",
+    "xp_m4_per_threat_pass": "xP / threat",
+    "xp_m4_threat_rate": "% threats",
+    "xp_residual_median": "Resíduo mediano",
+    "xp_surprise_rate": "% acima do esperado",
+    "xp_game_std_adj_score": "Estabilidade",
+    "xp_games_above_median_pct": "% jogos fortes",
+}
+
+XP_PA_TOOLTIPS: dict[str, str] = {
+    "xp_per_90": "Volume de xP gerado por passe, normalizado por 90 minutos.",
+    "threat_passes_p90": "Quantidade de passes threat (alto potencial ofensivo) por jogo.",
+    "xp_m4_per_pass": "xP médio por passe — mede a eficiência de cada entrega.",
+    "xp_m4_per_threat_pass": "xP médio apenas nos passes classificados como threat.",
+    "xp_m4_threat_rate": "Percentual de passes que são threat no total de passes.",
+    "xp_residual_median": "Mediana do resíduo (xP real − esperado) por passe. Valores positivos indicam passes melhores que o modelo prevê.",
+    "xp_surprise_rate": "Percentual de passes com resíduo positivo — passes que superam a expectativa do modelo.",
+    "xp_game_std_adj_score": "Estabilidade de entrega entre jogos, ajustada pelo nível médio de xP do jogador.",
+    "xp_games_above_median_pct": "Percentual de jogos em que o xP do jogador ficou acima da própria mediana.",
 }
 
 def iter_stats_metric_options() -> tuple[tuple[str, str], ...]:
@@ -1142,6 +1166,31 @@ def format_threat_rate_display(value: float | int | None) -> str:
 
 def stats_metric_label(key: str) -> str:
     return XP_STATS_LABELS.get(key, key)
+
+
+def pa_stats_metric_label(key: str) -> str:
+    return XP_PA_LABELS.get(key, stats_metric_label(key))
+
+
+def pa_stats_metric_tooltip(key: str) -> str:
+    return XP_PA_TOOLTIPS.get(key, "")
+
+
+def format_pa_stats_value(key: str, value: float | int | None) -> str:
+    if value is None:
+        return "—"
+    val = float(value)
+    if key in {"xp_m4_threat_rate", "xp_surprise_rate", "xp_games_above_median_pct"}:
+        return f"{100 * val:.1f}%"
+    if key.startswith("xp_residual"):
+        return f"{val:+.2f}"
+    if key in {"xp_game_std_adj", "xp_game_std_adj_score"}:
+        return f"{val:+.2f}"
+    if key in {"xp_m4_per_pass", "xp_m4_per_threat_pass"}:
+        return f"{val:.2f}"
+    if key in {"xp_per_90", "threat_passes_p90"}:
+        return f"{val:.1f}"
+    return format_stats_value(key, value)
 
 
 def format_stats_value(key: str, value: float | int | None) -> str:

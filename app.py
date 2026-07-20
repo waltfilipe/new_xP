@@ -1648,7 +1648,8 @@ st.markdown(
     .rating-sample-tip:hover .rating-sample-tipbox,
     .rating-badge-tip:hover .rating-tipbox,
     .rating-warning-tip:hover .rating-tipbox,
-    .metric-tip:hover .metric-tipbox {
+    .metric-tip:hover .metric-tipbox,
+    .metric-tip:focus-within .metric-tipbox {
         display: block;
     }
     .metric-tip {
@@ -3102,11 +3103,11 @@ st.markdown(
         overflow-y: auto;
     }
     .pa-pillar-group-label {
-        margin: 0.55rem 0 0.3rem 0;
-        color: #93c5fd;
-        font-size: 0.68rem;
-        font-weight: 700;
-        letter-spacing: 0.06em;
+        margin: 0 0 0.55rem 0;
+        color: #dbeafe;
+        font-size: 0.8rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
         text-transform: uppercase;
     }
     .pa-pillar-group-label:first-child {
@@ -3115,7 +3116,7 @@ st.markdown(
     .pa-pillar-group {
         display: flex;
         flex-direction: column;
-        gap: 0.38rem;
+        gap: 0.5rem;
     }
     .pa-subgroup-label {
         margin: 0.35rem 0 0.1rem 0;
@@ -3360,22 +3361,37 @@ st.markdown(
         font-style: italic;
     }
     .pa-xp-section-panel {
-        margin-bottom: 0.55rem;
-        padding-bottom: 0.45rem;
-        border-bottom: 1px solid rgba(36, 48, 73, 0.85);
+        margin-bottom: 0.75rem;
+        padding: 0.55rem 0.6rem 0.6rem;
+        border: 1px solid rgba(59, 130, 246, 0.14);
+        border-radius: 12px;
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.55) 0%, rgba(15, 23, 42, 0.2) 100%);
     }
     .pa-xp-section-panel:last-child {
         margin-bottom: 0;
-        padding-bottom: 0;
-        border-bottom: none;
     }
     .pa-xp-section-title {
-        color: #cbd5e1;
-        font-size: 0.72rem;
-        font-weight: 700;
-        letter-spacing: 0.05em;
+        color: #93c5fd;
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
         text-transform: uppercase;
-        margin-bottom: 0.35rem;
+        margin-bottom: 0.5rem;
+        padding-bottom: 0.35rem;
+        border-bottom: 1px solid rgba(59, 130, 246, 0.22);
+    }
+    .pa-xp-section-body .metric-line {
+        padding: 0.34rem 0;
+        font-size: 0.8rem;
+    }
+    .pa-xp-section-body .metric-line .stat-val {
+        font-size: 0.86rem;
+        font-weight: 700;
+        color: #f8fafc;
+    }
+    .pa-xp-section-body .metric-tipbox {
+        min-width: 220px;
+        max-width: 300px;
     }
     .pa-xp-section-body .metric-line:last-child {
         border-bottom: none;
@@ -4439,10 +4455,13 @@ def _metric_label_html(
     tooltip_fn=metric_tooltip,
 ) -> str:
     label = label_fn(key)
-    tip = html.escape(tooltip_fn(key))
+    tip = (tooltip_fn(key) or "").strip()
+    if not tip:
+        return html.escape(label)
+    tip_html = html.escape(tip)
     return (
-        f'<span class="metric-tip">{html.escape(label)}'
-        f'<span class="metric-tipbox">{tip}</span></span>'
+        f'<span class="metric-tip" tabindex="0">{html.escape(label)}'
+        f'<span class="metric-tipbox">{tip_html}</span></span>'
     )
 
 
@@ -5363,13 +5382,26 @@ def _player_analysis_score_stack_html(
     )
 
 
+def _pa_xp_metric_line_html(profile: dict, key: str, metric_ranks: dict) -> str:
+    return _metric_line_html(
+        xstats.pa_stats_metric_label(key),
+        key,
+        xstats.format_pa_stats_value(key, profile.get(key)),
+        metric_ranks,
+        show_rank=True,
+        label_fn=xstats.pa_stats_metric_label,
+        tooltip_fn=xstats.pa_stats_metric_tooltip,
+        rank_in_group_fn=_xp_rank_in_group_label,
+    )
+
+
 def _pa_xp_section_panel_html(
     profile: dict,
     section_title: str,
     keys: tuple[str, ...],
 ) -> str:
     metric_ranks = _xp_stats_metric_ranks_dict(profile, keys)
-    lines = "".join(_stats_metric_line_html(profile, key, metric_ranks) for key in keys)
+    lines = "".join(_pa_xp_metric_line_html(profile, key, metric_ranks) for key in keys)
     return (
         '<div class="pa-xp-section-panel">'
         f'<div class="pa-xp-section-title">{html.escape(section_title)}</div>'
