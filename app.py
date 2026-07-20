@@ -2497,6 +2497,23 @@ st.markdown(
         overflow: hidden;
         box-sizing: border-box;
     }
+    .pa-xp-profile-card {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+        padding: 0.65rem 0.75rem 0.7rem;
+        margin-bottom: 0;
+        gap: 0.35rem;
+    }
+    .pa-xp-profile-title {
+        margin: 0;
+        color: #93c5fd;
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
     .pa-pillars-card {
         display: flex;
         flex-direction: column;
@@ -2966,58 +2983,71 @@ st.markdown(
     .pa-xp-profile-panel {
         display: flex;
         flex-direction: column;
-        gap: 0.55rem;
-        padding: 0.35rem 0.55rem 0.55rem;
+        flex: 1;
+        min-height: 0;
+        gap: 0.35rem;
     }
     .pa-xp-radar-wrap {
         display: flex;
         justify-content: center;
         align-items: center;
-        min-height: 9.5rem;
+        flex: 1;
+        min-height: 7.5rem;
     }
     .pa-xp-radar-img {
-        width: min(100%, 220px);
+        width: min(100%, 210px);
         height: auto;
         display: block;
     }
     .pa-xp-profile-bars {
         display: flex;
         flex-direction: column;
-        gap: 0.45rem;
-        padding: 0.15rem 0.1rem 0.05rem;
+        gap: 0.55rem;
+        padding-top: 0.15rem;
+        flex-shrink: 0;
     }
-    .pa-xp-profile-bar-row {
-        display: grid;
-        grid-template-columns: 5.4rem 1fr auto;
-        align-items: center;
-        gap: 0.45rem;
+    .pa-xp-gradient-bar-row {
+        display: flex;
+        flex-direction: column;
+        gap: 0.32rem;
     }
-    .pa-xp-profile-bar-label {
-        color: #93c5fd;
+    .pa-xp-gradient-bar-label {
+        color: #cbd5e1;
         font-size: 0.68rem;
         font-weight: 700;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
         text-transform: uppercase;
     }
-    .pa-xp-profile-bar-row .rank-bar {
-        min-width: 0;
-        height: 8px;
+    .pa-xp-gradient-bar-track {
+        position: relative;
+        width: 100%;
+        height: 16px;
         border-radius: 999px;
-        background: rgba(15, 23, 42, 0.72);
-        border: 1px solid #334155;
-        overflow: hidden;
+        background: linear-gradient(
+            90deg,
+            #e2e8f0 0%,
+            #cbd5e1 16%,
+            #fbbf24 52%,
+            #f97316 78%,
+            #ef4444 100%
+        );
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.22);
     }
-    .pa-xp-profile-bar-row .rank-bar-fill {
-        display: block;
-        height: 100%;
-        border-radius: 999px;
+    .pa-xp-gradient-bar-track.pa-xp-gradient-bar-empty {
+        background: linear-gradient(90deg, #334155 0%, #475569 100%);
     }
-    .pa-xp-profile-bar-score {
-        color: #e2e8f0;
-        font-size: 0.76rem;
-        font-weight: 700;
-        min-width: 1.8rem;
-        text-align: right;
+    .pa-xp-gradient-bar-marker {
+        position: absolute;
+        top: 50%;
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        background: #f8fafc;
+        border: 2px solid #0f172a;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28);
+        pointer-events: none;
     }
     .pa-indices-panel .metric-line:last-child {
         border-bottom: none;
@@ -4803,33 +4833,28 @@ def _xp_archetype_radar_b64(xp_profile: dict | None) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def _xp_profile_bar_row_html(label: str, display_key: str, xp_profile: dict) -> str:
-    score = xp_profile.get(display_key)
+def _xp_profile_display_pct(xp_profile: dict, display_key: str) -> float | None:
     try:
-        display_score = float(score)
+        score = float(xp_profile.get(display_key))
     except (TypeError, ValueError):
-        display_score = None
-    if display_score is None:
-        bar_html = (
-            '<span class="rank-bar">'
-            '<span class="rank-bar-fill" style="width:0%;background:#334155"></span>'
-            "</span>"
-        )
-        score_html = '<span class="pa-xp-profile-bar-score">—</span>'
+        return None
+    return max(0.0, min(100.0, (score - 3.0) / 6.0 * 100.0))
+
+
+def _xp_gradient_bar_row_html(label: str, display_key: str, xp_profile: dict) -> str:
+    pct = _xp_profile_display_pct(xp_profile, display_key)
+    if pct is None:
+        track_html = '<div class="pa-xp-gradient-bar-track pa-xp-gradient-bar-empty"></div>'
     else:
-        color = score_display_color(display_score)
-        width_pct = max(6.0, min(100.0, (display_score - 3.0) / 6.0 * 100.0))
-        bar_html = (
-            f'<span class="rank-bar">'
-            f'<span class="rank-bar-fill" style="width:{width_pct:.0f}%;background:{color}"></span>'
-            f"</span>"
+        track_html = (
+            '<div class="pa-xp-gradient-bar-track">'
+            f'<span class="pa-xp-gradient-bar-marker" style="left:{pct:.1f}%"></span>'
+            "</div>"
         )
-        score_html = f'<span class="pa-xp-profile-bar-score">{display_score:.1f}</span>'
     return (
-        '<div class="pa-xp-profile-bar-row">'
-        f'<span class="pa-xp-profile-bar-label">{html.escape(label)}</span>'
-        f"{bar_html}"
-        f"{score_html}"
+        '<div class="pa-xp-gradient-bar-row">'
+        f'<span class="pa-xp-gradient-bar-label">{html.escape(label)}</span>'
+        f"{track_html}"
         "</div>"
     )
 
@@ -4838,20 +4863,15 @@ def _xp_profile_bars_html(xp_profile: dict | None) -> str:
     if not xp_profile:
         return ""
     rows = "".join(
-        _xp_profile_bar_row_html(xstats.XP_PROFILE_BAR_LABELS[key], key, xp_profile)
+        _xp_gradient_bar_row_html(xstats.XP_PROFILE_BAR_LABELS[key], key, xp_profile)
         for key in xstats.XP_PROFILE_BAR_KEYS
     )
     return f'<div class="pa-xp-profile-bars">{rows}</div>'
 
 
-def _xp_profile_radar_block_html(xp_profile: dict | None) -> str:
+def _xp_profile_score_column_html(xp_profile: dict | None) -> str:
     if not xp_profile:
-        return (
-            '<p class="pa-pillar-group-label">xP Profile</p>'
-            '<div class="pa-pillar-group pa-pillar-group-empty">'
-            '<p class="pa-placeholder-note">Indisponível</p>'
-            "</div>"
-        )
+        return ""
     radar_b64 = _xp_archetype_radar_b64(xp_profile)
     radar_img = (
         f'<img class="pa-xp-radar-img" src="data:image/png;base64,{radar_b64}" '
@@ -4861,10 +4881,25 @@ def _xp_profile_radar_block_html(xp_profile: dict | None) -> str:
     )
     bars_html = _xp_profile_bars_html(xp_profile)
     return (
-        '<p class="pa-pillar-group-label">xP Profile</p>'
-        '<div class="pa-pillar-group pa-xp-profile-panel">'
+        '<div class="player-card pa-xp-profile-card">'
+        '<p class="pa-xp-profile-title">xP Profile</p>'
         f'<div class="pa-xp-radar-wrap">{radar_img}</div>'
         f"{bars_html}"
+        "</div>"
+    )
+
+
+def _player_analysis_score_stack_html(
+    player: dict,
+    xp_profile: dict | None,
+    metric_ranks: dict,
+) -> str:
+    rating_panel = _player_analysis_rating_panel_html(player, metric_ranks)
+    profile_html = _xp_profile_score_column_html(xp_profile)
+    return (
+        '<div class="pa-score-stack">'
+        f"{rating_panel}"
+        f"{profile_html}"
         "</div>"
     )
 
@@ -5016,7 +5051,6 @@ def _build_xp_stats_card_html(
         f'<div class="pa-pillar-group">{passing_accordions}</div>'
     )
     archetype_html = _player_archetype_block_html(player)
-    profile_html = _xp_profile_radar_block_html(xp_profile)
     carrying_html = (
         '<p class="pa-pillar-group-label">Carrying</p>'
         '<div class="pa-pillar-group pa-pillar-group-empty">'
@@ -5025,7 +5059,7 @@ def _build_xp_stats_card_html(
     )
     return (
         '<div class="player-card pa-pillars-card">'
-        f'<div class="pa-pillars-stack">{passing_html}{archetype_html}{profile_html}{carrying_html}</div>'
+        f'<div class="pa-pillars-stack">{passing_html}{archetype_html}{carrying_html}</div>'
         "</div>"
     )
 
@@ -5094,7 +5128,7 @@ def _build_player_analysis_layout_html(
 ) -> str:
     metric_ranks = player.get("metric_ranks") if isinstance(player.get("metric_ranks"), dict) else {}
     layout_style = f"--pa-card-h: {PLAYER_ANALYSIS_CARD_HEIGHT_PX}px;"
-    rating_panel = _player_analysis_rating_panel_html(player, metric_ranks)
+    score_stack = _player_analysis_score_stack_html(player, xp_profile, metric_ranks)
     left_card = _build_player_analysis_left_card_html(
         player,
         origin_heatmap_b64=origin_heatmap_b64,
@@ -5109,9 +5143,7 @@ def _build_player_analysis_layout_html(
         f'<div class="pa-layout" style="{layout_style}">'
         f'<div class="pa-col pa-col-identity">{left_card}</div>'
         '<div class="pa-col pa-col-score">'
-        '<div class="pa-score-stack">'
-        f"{rating_panel}"
-        "</div>"
+        f"{score_stack}"
         "</div>"
         '<div class="pa-col pa-col-pillars">'
         f"{stats_card}"
