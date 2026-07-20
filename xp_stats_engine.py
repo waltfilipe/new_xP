@@ -483,9 +483,10 @@ XP_PROFILE_BAR_METRICS: dict[str, tuple[str, ...]] = {
 
 XP_PASS_RATING_FEATURES: tuple[str, ...] = (
     "xp_m4_per_pass",
+    "xp_m4_per_threat_pass",
     "xp_per_90",
-    "xp_quality_index",
-    "xp_consistency_index",
+    "xp_residual_median",
+    "xp_game_std_adj_score",
 )
 XP_PASS_RATING_TANH_SCALE = 1.25
 XP_PASS_RATING_TANH_AMPLITUDE = 1.15
@@ -951,7 +952,12 @@ def _xp_pass_rating_tanh_display(z_score: float) -> float:
 
 
 def attach_xp_pass_ratings(players: list[dict]) -> None:
-    """Attach compressed xP pass rating (R8 PCA + shrinkage + confidence)."""
+    """Attach compressed xP pass rating (5-axis PCA + pass shrinkage + confidence).
+
+    PC1 combines within-position z-scores of:
+    xP/passe, xP/threat, xP/jogo, resíduo mediano and estabilidade ajustada.
+    Raw metrics are shrunk toward the position mean using passes (or minutes for p90).
+    """
     if not players:
         return
 
