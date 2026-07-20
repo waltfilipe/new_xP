@@ -435,6 +435,8 @@ PA_RADAR_EXCLUDED_SECTIONS: frozenset[str] = frozenset()
 PA_RADAR_PASS_COLOR = "#60a5fa"
 PA_RADAR_CARRY_COLOR = "#34d399"
 PA_RADAR_FILL_NEUTRAL = "#c4b5fd"
+PA_XP_RADAR_LINE_COLOR = "#a855f7"
+PA_XP_RADAR_FILL_COLOR = "#a855f7"
 PA_COMPARE_PRIMARY_COLOR = "#a78bfa"
 PA_COMPARE_SECONDARY_COLOR = "#86efac"
 
@@ -2961,6 +2963,62 @@ st.markdown(
     .pa-indices-panel {
         padding: 0.35rem 0.55rem 0.45rem;
     }
+    .pa-xp-profile-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+        padding: 0.35rem 0.55rem 0.55rem;
+    }
+    .pa-xp-radar-wrap {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 9.5rem;
+    }
+    .pa-xp-radar-img {
+        width: min(100%, 220px);
+        height: auto;
+        display: block;
+    }
+    .pa-xp-profile-bars {
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+        padding: 0.15rem 0.1rem 0.05rem;
+    }
+    .pa-xp-profile-bar-row {
+        display: grid;
+        grid-template-columns: 5.4rem 1fr auto;
+        align-items: center;
+        gap: 0.45rem;
+    }
+    .pa-xp-profile-bar-label {
+        color: #93c5fd;
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+    .pa-xp-profile-bar-row .rank-bar {
+        min-width: 0;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.72);
+        border: 1px solid #334155;
+        overflow: hidden;
+    }
+    .pa-xp-profile-bar-row .rank-bar-fill {
+        display: block;
+        height: 100%;
+        border-radius: 999px;
+    }
+    .pa-xp-profile-bar-score {
+        color: #e2e8f0;
+        font-size: 0.76rem;
+        font-weight: 700;
+        min-width: 1.8rem;
+        text-align: right;
+    }
     .pa-indices-panel .metric-line:last-child {
         border-bottom: none;
     }
@@ -4672,22 +4730,142 @@ def _player_archetype_block_html(player: dict | None) -> str:
     )
 
 
-def _xp_indices_block_html(xp_profile: dict | None) -> str:
+def _xp_archetype_radar_b64(xp_profile: dict | None) -> str:
+    import base64
+    import io
+
+    import matplotlib
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    matplotlib.use("Agg")
+    if not xp_profile:
+        return ""
+
+    labels = [xstats.XP_ARCHETYPE_RADAR_LABELS[key] for key in xstats.XP_ARCHETYPE_RADAR_KEYS]
+    values = [
+        float(xp_profile.get(key) or 6.0)
+        for key in xstats.XP_ARCHETYPE_RADAR_KEYS
+    ]
+    if len(values) < 3:
+        return ""
+
+    count = len(values)
+    angles = np.linspace(0, 2 * np.pi, count, endpoint=False).tolist()
+    values_closed = values + [values[0]]
+    angles_closed = np.append(angles, angles[0])
+
+    fig, ax = plt.subplots(
+        figsize=(3.35, 3.35),
+        subplot_kw={"polar": True},
+        facecolor="none",
+    )
+    fig.patch.set_alpha(0.0)
+    ax.set_facecolor("none")
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
+    ax.fill(angles_closed, values_closed, color=PA_XP_RADAR_FILL_COLOR, alpha=0.18, zorder=2)
+    ax.plot(
+        angles_closed,
+        values_closed,
+        color=PA_XP_RADAR_LINE_COLOR,
+        linewidth=2.4,
+        linestyle="-",
+        alpha=0.95,
+        zorder=4,
+    )
+    for angle, value in zip(angles, values):
+        ax.plot(
+            angle,
+            value,
+            marker="o",
+            color=PA_XP_RADAR_LINE_COLOR,
+            markersize=5.5,
+            markeredgecolor="#0f172a",
+            markeredgewidth=0.7,
+            alpha=0.95,
+            zorder=5,
+        )
+    ax.set_ylim(3.0, 9.0)
+    ax.set_yticks([4, 5, 6, 7, 8])
+    ax.set_yticklabels([])
+    ax.set_xticks(angles)
+    ax.set_xticklabels(labels, fontsize=7.0, fontweight=600, linespacing=0.9, color="#cbd5e1")
+    ax.tick_params(axis="x", pad=14)
+    ax.grid(color="#334155", alpha=0.45, linewidth=0.6)
+    ax.spines["polar"].set_color("#334155")
+    ax.spines["polar"].set_alpha(0.55)
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=200, transparent=True, bbox_inches="tight", pad_inches=0.06)
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _xp_profile_bar_row_html(label: str, display_key: str, xp_profile: dict) -> str:
+    score = xp_profile.get(display_key)
+    try:
+        display_score = float(score)
+    except (TypeError, ValueError):
+        display_score = None
+    if display_score is None:
+        bar_html = (
+            '<span class="rank-bar">'
+            '<span class="rank-bar-fill" style="width:0%;background:#334155"></span>'
+            "</span>"
+        )
+        score_html = '<span class="pa-xp-profile-bar-score">—</span>'
+    else:
+        color = score_display_color(display_score)
+        width_pct = max(6.0, min(100.0, (display_score - 3.0) / 6.0 * 100.0))
+        bar_html = (
+            f'<span class="rank-bar">'
+            f'<span class="rank-bar-fill" style="width:{width_pct:.0f}%;background:{color}"></span>'
+            f"</span>"
+        )
+        score_html = f'<span class="pa-xp-profile-bar-score">{display_score:.1f}</span>'
+    return (
+        '<div class="pa-xp-profile-bar-row">'
+        f'<span class="pa-xp-profile-bar-label">{html.escape(label)}</span>'
+        f"{bar_html}"
+        f"{score_html}"
+        "</div>"
+    )
+
+
+def _xp_profile_bars_html(xp_profile: dict | None) -> str:
+    if not xp_profile:
+        return ""
+    rows = "".join(
+        _xp_profile_bar_row_html(xstats.XP_PROFILE_BAR_LABELS[key], key, xp_profile)
+        for key in xstats.XP_PROFILE_BAR_KEYS
+    )
+    return f'<div class="pa-xp-profile-bars">{rows}</div>'
+
+
+def _xp_profile_radar_block_html(xp_profile: dict | None) -> str:
     if not xp_profile:
         return (
-            '<p class="pa-pillar-group-label">Índices</p>'
+            '<p class="pa-pillar-group-label">xP Profile</p>'
             '<div class="pa-pillar-group pa-pillar-group-empty">'
             '<p class="pa-placeholder-note">Indisponível</p>'
             "</div>"
         )
-    metric_ranks = _xp_stats_metric_ranks_dict(xp_profile, xstats.XP_COMPOSITE_INDEX_KEYS)
-    lines = "".join(
-        _stats_metric_line_html(xp_profile, key, metric_ranks)
-        for key in xstats.XP_COMPOSITE_INDEX_KEYS
+    radar_b64 = _xp_archetype_radar_b64(xp_profile)
+    radar_img = (
+        f'<img class="pa-xp-radar-img" src="data:image/png;base64,{radar_b64}" '
+        'alt="xP archetype radar" />'
+        if radar_b64
+        else '<p class="pa-placeholder-note">Radar indisponível</p>'
     )
+    bars_html = _xp_profile_bars_html(xp_profile)
     return (
-        '<p class="pa-pillar-group-label">Índices</p>'
-        f'<div class="pa-pillar-group pa-indices-panel">{lines}</div>'
+        '<p class="pa-pillar-group-label">xP Profile</p>'
+        '<div class="pa-pillar-group pa-xp-profile-panel">'
+        f'<div class="pa-xp-radar-wrap">{radar_img}</div>'
+        f"{bars_html}"
+        "</div>"
     )
 
 
@@ -4838,7 +5016,7 @@ def _build_xp_stats_card_html(
         f'<div class="pa-pillar-group">{passing_accordions}</div>'
     )
     archetype_html = _player_archetype_block_html(player)
-    indices_html = _xp_indices_block_html(xp_profile)
+    profile_html = _xp_profile_radar_block_html(xp_profile)
     carrying_html = (
         '<p class="pa-pillar-group-label">Carrying</p>'
         '<div class="pa-pillar-group pa-pillar-group-empty">'
@@ -4847,7 +5025,7 @@ def _build_xp_stats_card_html(
     )
     return (
         '<div class="player-card pa-pillars-card">'
-        f'<div class="pa-pillars-stack">{passing_html}{archetype_html}{indices_html}{carrying_html}</div>'
+        f'<div class="pa-pillars-stack">{passing_html}{archetype_html}{profile_html}{carrying_html}</div>'
         "</div>"
     )
 

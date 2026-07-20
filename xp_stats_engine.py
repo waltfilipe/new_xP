@@ -295,12 +295,17 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
     out: dict[str, float | int] = dict(base)
     for sp_key in SPECIAL_PASS_COUNT_KEYS:
         out[special_pass_count_key(sp_key)] = int(masks[sp_key].sum())
+    final_third_count = int(masks["final_third"].sum())
     out.update({
         "xp_diagonal_long_total": _sum_xp(masks["diagonal_long"], xp),
         "xp_line_break_total": _sum_xp(masks["line_break"], xp),
         "xp_inversion_total": _sum_xp(masks["inversion"], xp),
         "xp_cross_total": _sum_xp(masks["cross"], xp),
         "xp_final_third_share": _sum_xp(masks["final_third"], xp) / xp_total if xp_total > 0 else 0.0,
+        "xp_m4_per_pass_final_third": (
+            float(xp[masks["final_third"]].mean()) if final_third_count else 0.0
+        ),
+        "passes_final_third": final_third_count,
         "xp_box_share": _sum_xp(masks["in_box"], xp) / xp_total if xp_total > 0 else 0.0,
         "xp_from_deep": _sum_xp(masks["from_deep"], xp),
         "xp_max_pass": float(xp.max()) if n else 0.0,
@@ -439,7 +444,72 @@ XP_COMPOSITE_INDEX_KEYS: tuple[str, ...] = (
     "xp_creator_index",
     "xp_progressor_index",
     "xp_finisher_pass_index",
+    "xp_quality_index",
+    "xp_consistency_index",
 )
+
+XP_ARCHETYPE_RADAR_KEYS: tuple[str, ...] = (
+    "xp_archetype_builder_display",
+    "xp_archetype_creator_display",
+    "xp_archetype_progressor_display",
+    "xp_archetype_finisher_display",
+)
+
+XP_ARCHETYPE_RADAR_LABELS: dict[str, str] = {
+    "xp_archetype_builder_display": "Builder",
+    "xp_archetype_creator_display": "Creator",
+    "xp_archetype_progressor_display": "Progressor",
+    "xp_archetype_finisher_display": "Finisher-pass",
+}
+
+XP_PROFILE_BAR_KEYS: tuple[str, ...] = (
+    "xp_quality_display",
+    "xp_consistency_display",
+)
+
+XP_PROFILE_BAR_LABELS: dict[str, str] = {
+    "xp_quality_display": "Quality",
+    "xp_consistency_display": "Consistency",
+}
+
+BUILDER_BASE_METRICS: tuple[str, ...] = (
+    "xp_line_break_total",
+    "special_line_break_p90",
+    "xp_m4_per_pass_short",
+    "xp_m4_threat_rate_short",
+)
+BUILDER_FB_METRICS: tuple[str, ...] = (
+    "xp_inversion_total",
+    "special_inversion_p90",
+)
+CREATOR_METRICS: tuple[str, ...] = (
+    "xp_final_third_share",
+    "threat_final_third_p90",
+    "xp_m4_per_pass_final_third",
+)
+PROGRESSOR_METRICS: tuple[str, ...] = (
+    "xp_diagonal_long_total",
+    "special_diagonal_long_p90",
+    "xp_from_deep",
+    "xp_m4_per_pass_long",
+    "xp_m4_threat_rate_long",
+)
+FINISHER_METRICS: tuple[str, ...] = (
+    "xp_box_share",
+    "threat_in_box_p90",
+    "xp_cross_total",
+    "special_cross_p90",
+)
+QUALITY_METRICS: tuple[str, ...] = (
+    "xp_residual_mean",
+    "xp_residual_positive",
+    "xp_surprise_rate",
+)
+CONSISTENCY_METRICS: tuple[str, ...] = (
+    "xp_game_mean",
+    "xp_games_above_median_pct",
+)
+CONSISTENCY_INVERT_METRICS: tuple[str, ...] = ("xp_game_std",)
 
 
 def iter_xp_player_analysis_blocks() -> tuple[tuple[str, tuple[str, ...]], ...]:
@@ -528,6 +598,14 @@ XP_STATS_LABELS: dict[str, str] = {
     "xp_creator_index": "Creator",
     "xp_progressor_index": "Progressor",
     "xp_finisher_pass_index": "Finisher-pass",
+    "xp_quality_index": "Quality",
+    "xp_consistency_index": "Consistency",
+    "xp_m4_per_pass_final_third": "xP/Passe Terço Final",
+    "xp_archetype_creator_display": "Creator",
+    "xp_archetype_progressor_display": "Progressor",
+    "xp_archetype_finisher_display": "Finisher-pass",
+    "xp_quality_display": "Quality",
+    "xp_consistency_display": "Consistency",
 }
 
 def iter_stats_metric_options() -> tuple[tuple[str, str], ...]:
@@ -701,8 +779,43 @@ def _series_or_zero(df: pd.DataFrame, col: str) -> pd.Series:
     return pd.Series(0.0, index=df.index)
 
 
+def _mean_z_columns(
+    df: pd.DataFrame,
+    cols: tuple[str, ...],
+    *,
+    invert: tuple[str, ...] = (),
+) -> pd.Series:
+    if not cols:
+        return pd.Series(0.0, index=df.index)
+    parts: list[pd.Series] = []
+    for col in cols:
+        z = _zscore(_series_or_zero(df, col))
+        if col in invert:
+            z = -z
+        parts.append(z)
+    return sum(parts) / len(parts)
+
+
+def _attach_index_display_scores(
+    rows: list[dict],
+    raw_key: str,
+    display_key: str,
+    composite: pd.Series,
+) -> None:
+    import passes_engine as pe
+
+    pool_size = len(rows)
+    ranks = _rank_descending(composite)
+    for i, row in enumerate(rows):
+        row[raw_key] = float(composite.iloc[i])
+        rank = int(ranks.iloc[i])
+        row[f"{raw_key}_rank_in_group"] = rank
+        row[f"{raw_key}_rank_pool_in_group"] = pool_size
+        row[display_key] = float(pe.rank_to_display_score(rank, pool_size))
+
+
 def attach_composite_indices(players: list[dict]) -> None:
-    """Within-position z-score composites for Player Analysis indices."""
+    """Within-position z-score composites for xP archetype radar and profile bars."""
     if not players:
         return
     pools: dict[str, list[dict]] = {}
@@ -712,31 +825,33 @@ def attach_composite_indices(players: list[dict]) -> None:
 
     for rows in pools.values():
         df = pd.DataFrame(rows)
-        z_deep = _zscore(_series_or_zero(df, "xp_from_deep"))
-        z_line_break = _zscore(_series_or_zero(df, "xp_line_break_total"))
-        z_short_threat_rate = _zscore(_series_or_zero(df, "xp_m4_threat_rate_short"))
-        z_final_third_share = _zscore(_series_or_zero(df, "xp_final_third_share"))
-        z_threat_final_third = _zscore(_series_or_zero(df, "threat_final_third_p90"))
-        z_per_pass = _zscore(_series_or_zero(df, "xp_m4_per_pass"))
-        z_per_pass_long = _zscore(_series_or_zero(df, "xp_m4_per_pass_long"))
-        z_diag_long = _zscore(_series_or_zero(df, "xp_diagonal_long_total"))
-        z_box_share = _zscore(_series_or_zero(df, "xp_box_share"))
-        z_threat_in_box = _zscore(_series_or_zero(df, "threat_in_box_p90"))
-        z_cross = _zscore(_series_or_zero(df, "xp_cross_total"))
+        position_group = str(rows[0].get("position_group") or "")
+        builder_cols = list(BUILDER_BASE_METRICS)
+        if position_group == "fullbacks":
+            builder_cols.extend(BUILDER_FB_METRICS)
 
-        for i, row in enumerate(rows):
-            row["xp_builder_index"] = float(
-                z_deep.iloc[i] + z_line_break.iloc[i] + z_short_threat_rate.iloc[i]
-            )
-            row["xp_creator_index"] = float(
-                z_final_third_share.iloc[i] + z_threat_final_third.iloc[i] + z_per_pass.iloc[i]
-            )
-            row["xp_progressor_index"] = float(
-                z_per_pass_long.iloc[i] + z_diag_long.iloc[i] + z_deep.iloc[i]
-            )
-            row["xp_finisher_pass_index"] = float(
-                z_box_share.iloc[i] + z_threat_in_box.iloc[i] + z_cross.iloc[i]
-            )
+        composites = {
+            "xp_builder_index": _mean_z_columns(df, tuple(builder_cols)),
+            "xp_creator_index": _mean_z_columns(df, CREATOR_METRICS),
+            "xp_progressor_index": _mean_z_columns(df, PROGRESSOR_METRICS),
+            "xp_finisher_pass_index": _mean_z_columns(df, FINISHER_METRICS),
+            "xp_quality_index": _mean_z_columns(df, QUALITY_METRICS),
+            "xp_consistency_index": _mean_z_columns(
+                df,
+                CONSISTENCY_METRICS + CONSISTENCY_INVERT_METRICS,
+                invert=CONSISTENCY_INVERT_METRICS,
+            ),
+        }
+        display_map = {
+            "xp_builder_index": "xp_archetype_builder_display",
+            "xp_creator_index": "xp_archetype_creator_display",
+            "xp_progressor_index": "xp_archetype_progressor_display",
+            "xp_finisher_pass_index": "xp_archetype_finisher_display",
+            "xp_quality_index": "xp_quality_display",
+            "xp_consistency_index": "xp_consistency_display",
+        }
+        for raw_key, composite in composites.items():
+            _attach_index_display_scores(rows, raw_key, display_map[raw_key], composite)
 
 
 def attach_distance_indices(players: list[dict]) -> None:
@@ -904,7 +1019,7 @@ def format_stats_value(key: str, value: float | int | None) -> str:
         return f"{100 * val:.1f}%"
     if key.endswith("_rate") or key.endswith("_share") or key.endswith("_pct") or key == "xp_surprise_rate" or key == "xp_threat_conversion":
         return f"{100 * val:.1f}%"
-    if key.startswith("xp_m4_per_pass_"):
+    if key.startswith("xp_m4_per_pass_") or key == "xp_m4_per_pass_final_third":
         return f"{val:.3f}"
     if key == "xp_m4_per_pass":
         return f"{val:.3f}"
@@ -918,4 +1033,6 @@ def format_stats_value(key: str, value: float | int | None) -> str:
         return f"{val:.3f}"
     if key in XP_COMPOSITE_INDEX_KEYS:
         return f"{val:+.2f}"
+    if key in XP_ARCHETYPE_RADAR_KEYS or key in XP_PROFILE_BAR_KEYS:
+        return f"{val:.1f}"
     return f"{val:.1f}"
