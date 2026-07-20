@@ -311,6 +311,7 @@ def _rating_confidence_for_key(player: dict, rating_key: str = "pass_rating") ->
         "pass_rating": "pass_rating_confidence",
         "carry_rating": "carry_rating_confidence",
         "progression_rating": "rating_confidence",
+        "xp_pass_rating": "xp_pass_rating_confidence",
     }
     conf = player.get(confidence_keys.get(rating_key, "rating_confidence"))
     if conf is not None:
@@ -4536,15 +4537,44 @@ def _placeholder_rating_block_html(label: str) -> str:
     )
 
 
-def _player_analysis_rating_panel_html(player: dict, metric_ranks: dict) -> str:
-    _ = (player, metric_ranks)
+def _player_analysis_rating_panel_html(
+    player: dict,
+    metric_ranks: dict,
+    xp_profile: dict | None = None,
+) -> str:
     blocks = [
         _placeholder_rating_block_html("Overall"),
         '<div class="pa-rating-divider"></div>',
-        _placeholder_rating_block_html("Pass"),
+    ]
+    if xp_profile and xp_profile.get("xp_pass_rating") is not None:
+        pass_ranks = dict(metric_ranks)
+        xp_metric_ranks = xp_profile.get("metric_ranks")
+        if isinstance(xp_metric_ranks, dict) and "xp_pass_rating" in xp_metric_ranks:
+            pass_ranks["xp_pass_rating"] = xp_metric_ranks["xp_pass_rating"]
+        else:
+            rank = xp_profile.get("xp_pass_rating_rank_in_group")
+            total = xp_profile.get("xp_pass_rating_rank_pool_in_group")
+            if rank and total:
+                pass_ranks["xp_pass_rating"] = {
+                    "rank": int(rank),
+                    "total": int(total),
+                    "value": xp_profile.get("xp_pass_rating"),
+                }
+        pass_player = {**player, **xp_profile}
+        blocks.append(
+            _player_analysis_rating_block_html(
+                pass_player,
+                pass_ranks,
+                rating_key="xp_pass_rating",
+                label="Pass",
+            )
+        )
+    else:
+        blocks.append(_placeholder_rating_block_html("Pass"))
+    blocks.extend([
         '<div class="pa-rating-divider"></div>',
         _placeholder_rating_block_html("Carry"),
-    ]
+    ])
     return (
         '<div class="player-card pa-rating-panel">'
         f'<div class="pa-rating-row">{"".join(blocks)}</div>'
@@ -5157,7 +5187,7 @@ def _player_analysis_score_stack_html(
     xp_profile: dict | None,
     metric_ranks: dict,
 ) -> str:
-    rating_panel = _player_analysis_rating_panel_html(player, metric_ranks)
+    rating_panel = _player_analysis_rating_panel_html(player, metric_ranks, xp_profile)
     profile_html = _xp_profile_score_column_html(xp_profile)
     return (
         '<div class="pa-score-stack">'

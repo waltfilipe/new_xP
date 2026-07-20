@@ -478,6 +478,15 @@ XP_PROFILE_BAR_METRICS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+XP_PASS_RATING_FEATURES: tuple[str, ...] = (
+    "xp_m4_per_pass",
+    "xp_per_90",
+    "xp_quality_index",
+    "xp_consistency_index",
+)
+XP_PASS_RATING_TANH_SCALE = 1.25
+XP_PASS_RATING_TANH_AMPLITUDE = 1.15
+
 BUILDER_BASE_METRICS: tuple[str, ...] = (
     "xp_line_break_total",
     "special_line_break_p90",
@@ -878,6 +887,109 @@ def attach_composite_indices(players: list[dict]) -> None:
         }
         for raw_key, composite in composites.items():
             _attach_index_display_scores(rows, raw_key, display_map[raw_key], composite)
+
+
+def _xp_pass_rating_shrink_sample(feature_key: str, player: dict) -> float:
+    if feature_key == "xp_per_90":
+        return float(player.get("minutes") or 0.0)
+    return float(player.get("passes_completed") or 0.0)
+
+
+def _xp_pass_rating_shrink_k(feature_key: str) -> float:
+    if feature_key == "xp_per_90":
+        return float(pe.SHRINKAGE_MINUTES_K)
+    return float(pe.SHRINKAGE_PASS_K)
+
+
+def _xp_pass_rating_shrink_value(
+    feature_key: str,
+    player: dict,
+    pool_values: list[float],
+) -> float:
+    clean = [float(v) for v in pool_values if v is not None and np.isfinite(float(v))]
+    prior = float(np.mean(clean)) if clean else 0.0
+    raw = player.get(feature_key)
+    sample = _xp_pass_rating_shrink_sample(feature_key, player)
+    if raw is None or sample <= 0:
+        return prior
+    weight = sample / (sample + _xp_pass_rating_shrink_k(feature_key))
+    return weight * float(raw) + (1.0 - weight) * prior
+
+
+def _xp_pass_rating_tanh_display(z_score: float) -> float:
+    return float(
+        pe.RATING_DISPLAY_MID
+        + XP_PASS_RATING_TANH_AMPLITUDE * np.tanh(float(z_score) / XP_PASS_RATING_TANH_SCALE)
+    )
+
+
+def attach_xp_pass_ratings(players: list[dict]) -> None:
+    """Attach compressed xP pass rating (R8 PCA + shrinkage + confidence)."""
+    if not players:
+        return
+
+    from sklearn.decomposition import PCA
+
+    pools: dict[str, list[dict]] = {}
+    for player in players:
+        group = str(player.get("position_group") or "CM")
+        pools.setdefault(group, []).append(player)
+
+    for rows in pools.values():
+        pool_size = len(rows)
+        if pool_size == 0:
+            continue
+
+        passes = [float(p.get("passes_completed") or 0.0) for p in rows]
+        p25_passes = float(np.percentile(passes, 25)) if passes else float(pe.RATING_CONFIDENCE_PASSES)
+        p25_passes = max(p25_passes, 1.0)
+
+        shrunk_by_feature: dict[str, list[float]] = {}
+        for feature_key in XP_PASS_RATING_FEATURES:
+            pool_values = [float(p.get(feature_key) or 0.0) for p in rows]
+            shrunk_by_feature[feature_key] = [
+                _xp_pass_rating_shrink_value(feature_key, player, pool_values)
+                for player in rows
+            ]
+
+        feature_frame = pd.DataFrame(shrunk_by_feature)
+        z_frame = feature_frame.apply(_zscore)
+        if pool_size >= 8:
+            pca = PCA(n_components=1, random_state=42)
+            pca_scores = pca.fit_transform(z_frame.to_numpy(dtype=float)).ravel().tolist()
+        else:
+            pca_scores = z_frame.mean(axis=1).astype(float).tolist()
+
+        raw_displays = [_xp_pass_rating_tanh_display(score) for score in pca_scores]
+        adjusted_displays: list[float] = []
+        for player, raw_display, pca_z in zip(rows, raw_displays, pca_scores):
+            player["position_p25_passes"] = round(p25_passes, 1)
+            confidence = pe._rating_confidence(player)
+            adjusted, uncertainty = pe._apply_rating_confidence(raw_display, confidence)
+            adjusted_displays.append(adjusted)
+            player["xp_pass_rating_raw_display"] = round(raw_display, 2)
+            player["xp_pass_rating_confidence"] = round(confidence, 4)
+            player["xp_pass_rating_uncertainty"] = round(uncertainty, 2)
+            player["xp_pass_rating"] = round(adjusted / 10.0, 4)
+            player["xp_pass_rating_pca_z"] = round(float(pca_z), 4)
+
+        ranked = sorted(
+            zip(rows, adjusted_displays),
+            key=lambda item: float(item[1]),
+            reverse=True,
+        )
+        for rank, (row, _display) in enumerate(ranked, start=1):
+            row["xp_pass_rating_rank_in_group"] = rank
+            row["xp_pass_rating_rank_pool_in_group"] = pool_size
+            metric_ranks = row.get("metric_ranks")
+            if not isinstance(metric_ranks, dict):
+                metric_ranks = {}
+            metric_ranks["xp_pass_rating"] = {
+                "rank": rank,
+                "total": pool_size,
+                "value": row.get("xp_pass_rating"),
+            }
+            row["metric_ranks"] = metric_ranks
 
 
 def attach_distance_indices(players: list[dict]) -> None:
