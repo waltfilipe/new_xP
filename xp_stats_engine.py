@@ -485,6 +485,7 @@ XP_PASS_RATING_FEATURES: tuple[str, ...] = (
     "xp_m4_per_pass",
     "xp_m4_per_threat_pass",
     "xp_per_90",
+    "threat_passes_p90",
     "xp_residual_median",
     "xp_game_std_adj_score",
 )
@@ -918,13 +919,13 @@ def attach_composite_indices(players: list[dict]) -> None:
 
 
 def _xp_pass_rating_shrink_sample(feature_key: str, player: dict) -> float:
-    if feature_key == "xp_per_90":
+    if feature_key in {"xp_per_90", "threat_passes_p90"}:
         return float(player.get("minutes") or 0.0)
     return float(player.get("passes_completed") or 0.0)
 
 
 def _xp_pass_rating_shrink_k(feature_key: str) -> float:
-    if feature_key == "xp_per_90":
+    if feature_key in {"xp_per_90", "threat_passes_p90"}:
         return float(pe.SHRINKAGE_MINUTES_K)
     return float(pe.SHRINKAGE_PASS_K)
 
@@ -952,11 +953,11 @@ def _xp_pass_rating_tanh_display(z_score: float) -> float:
 
 
 def attach_xp_pass_ratings(players: list[dict]) -> None:
-    """Attach compressed xP pass rating (5-axis PCA + pass shrinkage + confidence).
+    """Attach compressed xP pass rating (6-axis PCA + pass shrinkage + confidence).
 
     PC1 combines within-position z-scores of:
-    xP/passe, xP/threat, xP/jogo, resíduo mediano and estabilidade ajustada.
-    Raw metrics are shrunk toward the position mean using passes (or minutes for p90).
+    xP/passe, xP/threat, xP/jogo, threats/jogo, resíduo mediano and estabilidade ajustada.
+    Raw metrics are shrunk toward the position mean using passes (or minutes for p90 metrics).
     """
     if not players:
         return
