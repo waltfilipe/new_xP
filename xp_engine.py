@@ -16,7 +16,7 @@ from sklearn.pipeline import Pipeline
 import passes_engine as pe
 import xp_study_engine as xse
 
-XP_DATA_CACHE_VERSION = 27
+XP_DATA_CACHE_VERSION = 28
 XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total",
     "xp_m4_per_pass",
@@ -27,14 +27,27 @@ XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total_long",
     "xp_m4_threat_long_p90",
 )
-XP_MODEL_VERSION = "m4_od_12x8_b4_a2_pr0_global_ita_dist30_ridge_preprog_v4"
+XP_MODEL_VERSION = "m4_od_12x8_b4_a2_pr0_global_ita_dist30_access_ridge_v5"
 THREAT_QUANTILE = 0.10
 THREAT_PROGRESS_MIN = 0.0
 XP_COL = "xp_m4"
 XP_SPATIAL_COL = "xp_hier_od"
+XP_ACCESSIBILITY_MULT_COL = "xp_accessibility_mult"
 XP_EXPECTED_COL = "xp_expected"
 XP_RESIDUAL_COL = "xp_residual"
 THREAT_COL = "is_threat_m4"
+
+# Accessibility model B: local connectivity is easier deep, harder in attack.
+XP_ACCESS_LOCALITY_SCALE = 1.35
+XP_ACCESS_PRESSURE_CENTER_X = 52.0
+XP_ACCESS_PRESSURE_SCALE = 12.0
+XP_ACCESS_PRESSURE_WEIGHT = 0.65
+XP_ACCESS_BETA_DEEP_SHORT = 0.42
+XP_ACCESS_BETA_SHORT = 0.22
+XP_ACCESS_BETA_LONG = 0.08
+XP_ACCESS_MULT_FLOOR = 0.68
+XP_ACCESS_DEEP_X = 66.0
+XP_ACCESS_SHORT_CUTOFF_M = 15.0
 
 GRID = xse.STUDY_GRID
 BANDS = xse.DISTANCE_BAND_ORDER
@@ -118,10 +131,51 @@ def _progress_multiplier_array(df: pd.DataFrame) -> np.ndarray:
     return xse.progress_toward_goal_multiplier(_progress_ratio_array(df))
 
 
+def _cell_distance_array(
+    oy: np.ndarray,
+    ox: np.ndarray,
+    dy: np.ndarray,
+    dx: np.ndarray,
+) -> np.ndarray:
+    return np.sqrt((oy - dy) ** 2 + (ox - dx) ** 2)
+
+
+def _field_pressure_array(x_start: np.ndarray) -> np.ndarray:
+    """0 = deep own half, 1 = attacking third."""
+    return 1.0 / (1.0 + np.exp(-(x_start - XP_ACCESS_PRESSURE_CENTER_X) / XP_ACCESS_PRESSURE_SCALE))
+
+
+def accessibility_multiplier_array(df: pd.DataFrame) -> np.ndarray:
+    """Model B: discount easy local passes, stronger in deep zones."""
+    oy = df["oy"].to_numpy(int)
+    ox = df["ox"].to_numpy(int)
+    dy = df["dy"].to_numpy(int)
+    dx = df["dx"].to_numpy(int)
+    x_start = df["x_start"].to_numpy(dtype=float)
+    dist_m = df["pass_distance"].to_numpy(dtype=float)
+
+    locality = np.exp(-_cell_distance_array(oy, ox, dy, dx) / XP_ACCESS_LOCALITY_SCALE)
+    pressure = _field_pressure_array(x_start)
+    ease = locality * (1.0 - XP_ACCESS_PRESSURE_WEIGHT * pressure)
+
+    beta = np.where(
+        (x_start < XP_ACCESS_DEEP_X) & (dist_m <= XP_ACCESS_SHORT_CUTOFF_M),
+        XP_ACCESS_BETA_DEEP_SHORT,
+        np.where(dist_m <= xse.XP_DISTANCE_BAND_MAX_SHORT_M, XP_ACCESS_BETA_SHORT, XP_ACCESS_BETA_LONG),
+    )
+    return np.clip(1.0 - beta * ease, XP_ACCESS_MULT_FLOOR, 1.0)
+
+
+def _accessibility_multiplier_array(df: pd.DataFrame) -> np.ndarray:
+    if XP_ACCESSIBILITY_MULT_COL in df.columns:
+        return df[XP_ACCESSIBILITY_MULT_COL].to_numpy(dtype=float)
+    return accessibility_multiplier_array(df)
+
+
 def _expected_xp_from_model(model: Pipeline, df: pd.DataFrame) -> np.ndarray:
-    """Expected xP = Ridge(spatial) × same progress multiplier as Model 4."""
+    """Expected xP = Ridge(spatial) × progress × accessibility (same as Model 4)."""
     spatial = np.maximum(model.predict(_build_design_matrix(df)), 0.0)
-    return spatial * _progress_multiplier_array(df)
+    return spatial * _progress_multiplier_array(df) * _accessibility_multiplier_array(df)
 
 
 def score_match_passes_m4(
@@ -150,8 +204,14 @@ def score_match_passes_m4(
         scored["progress_ratio"] = xse._progress_ratio_series(scored)
     progress_mult = xse.progress_toward_goal_multiplier(scored["progress_ratio"].to_numpy(dtype=float))
     scored["xp_progress_mult"] = progress_mult
-    scored[XP_COL] = (
-        scored[xse.XP_MODEL_COLUMNS[xse.XP_MODEL_HIER_OD]].to_numpy(dtype=float) * progress_mult
+    scored[XP_ACCESSIBILITY_MULT_COL] = 1.0
+    comp_mask = scored["is_won"] & scored["has_end"] & (scored["ox"] >= 0) & (scored["dx"] >= 0)
+    if comp_mask.any():
+        scored.loc[comp_mask, XP_ACCESSIBILITY_MULT_COL] = accessibility_multiplier_array(scored.loc[comp_mask])
+    base_xp = scored[xse.XP_MODEL_COLUMNS[xse.XP_MODEL_HIER_OD]].to_numpy(dtype=float) * progress_mult
+    scored[XP_COL] = np.minimum(
+        base_xp * scored[XP_ACCESSIBILITY_MULT_COL].to_numpy(dtype=float),
+        xse.XP_PASS_MAX,
     )
     return scored
 
@@ -247,7 +307,8 @@ def _fit_artifacts_on_passes(train_passes: pd.DataFrame) -> dict:
         "training_pool": "global",
         "team_surface": "global_reference_only",
         "ridge_target": XP_SPATIAL_COL,
-        "expected_formula": "ridge_spatial * xp_progress_mult",
+        "expected_formula": "ridge_spatial * xp_progress_mult * xp_accessibility_mult",
+        "accessibility_model": "locality_pressure_v1",
         "training_passes": int(len(train)),
         "training_matches": int(train["event_id"].nunique()) if "event_id" in train.columns else 0,
     }
@@ -399,6 +460,7 @@ def load_season_passes(*, rebuild: bool = False) -> pd.DataFrame:
         THREAT_COL not in df.columns
         or XP_COL not in df.columns
         or "xp_progress_mult" not in df.columns
+        or XP_ACCESSIBILITY_MULT_COL not in df.columns
     ):
         return build_serie_b_season_passes(force_artifacts=True)
     if XP_META_PATH.exists():
