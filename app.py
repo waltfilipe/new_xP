@@ -2412,7 +2412,7 @@ st.markdown(
     .pa-compare-legend-primary::before { background: #a78bfa; }
     .pa-compare-legend-secondary::before { background: #86efac; }
     .pa-maps-compact {
-        max-width: 1180px;
+        max-width: 980px;
         margin: 0 auto;
     }
     .pa-maps-compact [data-testid="stVerticalBlock"] > div {
@@ -2424,10 +2424,16 @@ st.markdown(
         margin: 0 0 0.65rem 0;
     }
     .pa-maps-grid-row [data-testid="stImage"] img,
-    .pa-maps-compact [data-testid="stPyplot"],
-    .pa-maps-compact [data-testid="stPlotlyChart"] {
-        max-height: 360px;
+    .pa-maps-compact [data-testid="stPyplot"] {
+        max-height: 220px;
         object-fit: contain;
+    }
+    .pa-maps-compact [data-testid="stPlotlyChart"] {
+        width: 100%;
+        min-height: 640px;
+    }
+    .pa-maps-compact [data-testid="stPlotlyChart"] > div {
+        height: 100% !important;
     }
     .pa-stats-filter {
         display: grid;
@@ -6177,10 +6183,7 @@ def render_maps_section(
             use_container_width=True,
             config={"displayModeBar": False, "responsive": True},
         )
-        st.caption(
-            f"{len(passes_df)} passes completos exibidos · passe o mouse na origem (círculo) "
-            "para ver xP e diferença vs esperado"
-        )
+        st.caption(f"{len(passes_df)} passes completos · círculo = origem (hover: xP e vs esperado) · quadrado = destino")
     st.markdown("</div>", unsafe_allow_html=True)
 
 

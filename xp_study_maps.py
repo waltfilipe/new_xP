@@ -17,7 +17,8 @@ from xp_study_engine import FIELD_X, FIELD_Y, XP_GRID_COLS, XP_GRID_ROWS, XP_PAS
 
 FIG_W, FIG_H = 7.0, 4.65
 FIG_DPI = 220
-MAP_PLOTLY_HEIGHT = 340
+MAP_PLOTLY_HEIGHT = 640
+PITCH_ASPECT = FIELD_X / FIELD_Y
 ARROW_WIDTH = 0.9
 ARROW_HEADWIDTH = 1.3
 ARROW_HEADLENGTH = 1.3
@@ -190,23 +191,28 @@ def _plasma_rgba(values: np.ndarray, *, vmax: float | None = None) -> list[str]:
 
 
 def _plotly_pitch_shapes() -> list[dict]:
-    line = dict(color="rgba(255,255,255,0.92)", width=1.2)
+    line = dict(color="rgba(255,255,255,0.94)", width=1.8)
     empty = "rgba(0,0,0,0)"
+    grass = "rgba(30, 58, 47, 0.55)"
     return [
-        dict(type="rect", x0=0, y0=0, x1=FIELD_X, y1=FIELD_Y, line=dict(color="rgba(255,255,255,0.95)", width=1.6), fillcolor=empty),
+        dict(type="rect", x0=0, y0=0, x1=FIELD_X, y1=FIELD_Y, fillcolor=grass, line=dict(width=0)),
+        dict(type="rect", x0=0, y0=0, x1=FIELD_X, y1=FIELD_Y, line=dict(color="rgba(255,255,255,0.96)", width=2.0), fillcolor=empty),
         dict(type="line", x0=FIELD_X / 2, y0=0, x1=FIELD_X / 2, y1=FIELD_Y, line=line),
         dict(type="circle", x0=FIELD_X / 2 - 9, y0=FIELD_Y / 2 - 9, x1=FIELD_X / 2 + 9, y1=FIELD_Y / 2 + 9, line=line, fillcolor=empty),
         dict(type="rect", x0=0, y0=18, x1=18, y1=62, line=line, fillcolor=empty),
         dict(type="rect", x0=102, y0=18, x1=FIELD_X, y1=62, line=line, fillcolor=empty),
+        dict(type="circle", x0=FIELD_X / 2 - 0.35, y0=FIELD_Y / 2 - 0.35, x1=FIELD_X / 2 + 0.35, y1=FIELD_Y / 2 + 0.35, fillcolor="rgba(255,255,255,0.95)", line=dict(width=0)),
     ]
 
 
-def _plotly_map_layout(*, title: str, height: int = MAP_PLOTLY_HEIGHT):
+def _plotly_map_layout(*, title: str, height: int = MAP_PLOTLY_HEIGHT, show_colorbar: bool = False):
+    pad_x = 3.0
+    pad_y = pad_x / PITCH_ASPECT
     return dict(
-        title=dict(text=title, font=dict(size=11, color="#f8fafc"), x=0.02, xanchor="left"),
+        title=dict(text=title, font=dict(size=13, color="#f8fafc"), x=0.5, xanchor="center", y=0.98),
         height=height,
-        margin=dict(l=8, r=8, t=40, b=8),
-        paper_bgcolor="#1a1a2e",
+        margin=dict(l=12, r=88 if show_colorbar else 20, t=52, b=12),
+        paper_bgcolor="#0f172a",
         plot_bgcolor="#1a1a2e",
         font=dict(color="#cbd5e1", size=10),
         hoverlabel=dict(
@@ -215,19 +221,21 @@ def _plotly_map_layout(*, title: str, height: int = MAP_PLOTLY_HEIGHT):
             font=dict(color="#f8fafc", size=12),
         ),
         xaxis=dict(
-            range=[-2, FIELD_X + 2],
+            range=[-pad_x, FIELD_X + pad_x],
             visible=False,
             fixedrange=True,
+            constrain="domain",
         ),
         yaxis=dict(
-            range=[-2, FIELD_Y + 2],
+            range=[-pad_y, FIELD_Y + pad_y],
             visible=False,
             scaleanchor="x",
-            scaleratio=1,
+            scaleratio=1.0 / PITCH_ASPECT,
             fixedrange=True,
         ),
         showlegend=False,
         shapes=_plotly_pitch_shapes(),
+        autosize=True,
     )
 
 
@@ -245,7 +253,7 @@ def build_special_passes_season_map_figure(
     """Interactive season map with xP / residual hover on pass origins."""
     import plotly.graph_objects as go
 
-    title = f"{player_name}\n{category_label} · {season_label}"
+    title = f"{player_name} · {category_label} · {season_label}"
     if passes is None or passes.empty:
         fig = go.Figure()
         fig.update_layout(**_plotly_map_layout(title=title, height=height))
@@ -263,32 +271,12 @@ def build_special_passes_season_map_figure(
     has_xp = xp_col in work.columns
     if has_xp:
         values = work[xp_col].to_numpy(dtype=float)
-        colors = _plasma_rgba(values)
-        vmax = max(float(np.max(values)), 0.05)
+        vmax = min(max(float(np.max(values)), 0.05), XP_PASS_MAX)
+        colors = _plasma_rgba(values, vmax=vmax)
     else:
-        colors = ["rgba(96,165,250,0.90)"] * len(work)
-
-    for row, color in zip(work.itertuples(index=False), colors):
-        fig.add_trace(
-            go.Scatter(
-                x=[row.x_start, row.x_end],
-                y=[row.y_start, row.y_end],
-                mode="lines",
-                line=dict(color=color, width=1.6),
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=[row.x_end],
-                y=[row.y_end],
-                mode="markers",
-                marker=dict(size=7, symbol="square", color=color, line=dict(width=0.5, color="#f8fafc")),
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
+        values = np.zeros(len(work))
+        vmax = XP_PASS_MAX
+        colors = ["rgba(96,165,250,0.92)"] * len(work)
 
     xp_vals = work[xp_col].to_numpy(dtype=float) if has_xp else np.zeros(len(work))
     if residual_col in work.columns:
@@ -298,18 +286,62 @@ def build_special_passes_season_map_figure(
     else:
         residual_vals = np.zeros(len(work))
 
+    for row, color in zip(work.itertuples(index=False), colors):
+        width = 2.0
+        if has_xp:
+            width = 1.8 + 1.6 * min(float(getattr(row, xp_col)) / vmax, 1.0)
+        fig.add_annotation(
+            x=row.x_end,
+            y=row.y_end,
+            ax=row.x_start,
+            ay=row.y_start,
+            xref="x",
+            yref="y",
+            axref="x",
+            ayref="y",
+            showarrow=True,
+            arrowhead=3,
+            arrowsize=1.35,
+            arrowwidth=width,
+            arrowcolor=color,
+            opacity=0.94,
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=work["x_end"].to_numpy(dtype=float),
+            y=work["y_end"].to_numpy(dtype=float),
+            mode="markers",
+            marker=dict(
+                size=11,
+                symbol="square",
+                color=colors,
+                line=dict(width=1.0, color="#f8fafc"),
+            ),
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+
+    marker_sizes = [
+        12.0 + 8.0 * (float(v) / vmax if vmax > 0 else 0.0)
+        for v in (values if has_xp else np.zeros(len(work)))
+    ]
     fig.add_trace(
         go.Scatter(
             x=work["x_start"].to_numpy(dtype=float),
             y=work["y_start"].to_numpy(dtype=float),
             mode="markers",
             marker=dict(
-                size=9,
+                size=marker_sizes,
+                sizemode="diameter",
                 color=colors,
-                line=dict(width=0.6, color="#f8fafc"),
+                line=dict(width=1.2, color="#f8fafc"),
+                opacity=0.98,
             ),
             customdata=np.column_stack([xp_vals, residual_vals]),
             hovertemplate=(
+                "<b>Origem do passe</b><br>"
                 "xP: %{customdata[0]:.3f}<br>"
                 "vs esperado: %{customdata[1]:+.3f}"
                 "<extra></extra>"
@@ -318,8 +350,40 @@ def build_special_passes_season_map_figure(
         )
     )
 
+    if has_xp:
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker=dict(
+                    colorscale="Plasma",
+                    cmin=0.0,
+                    cmax=vmax,
+                    color=[vmax * 0.5],
+                    showscale=True,
+                    colorbar=dict(
+                        title=dict(text="xP", font=dict(color="#cbd5e1", size=11)),
+                        tickfont=dict(color="#94a3b8", size=10),
+                        thickness=14,
+                        len=0.72,
+                        bgcolor="rgba(15,23,42,0.0)",
+                        borderwidth=0,
+                    ),
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+
     count = len(work)
-    fig.update_layout(**_plotly_map_layout(title=f"{player_name}\n{count} passes · {category_label} · {season_label}", height=height))
+    fig.update_layout(
+        **_plotly_map_layout(
+            title=f"{title}<br><sup>{count} passes · hover na origem para xP e resíduo</sup>",
+            height=height,
+            show_colorbar=has_xp,
+        )
+    )
     return fig
 
 
