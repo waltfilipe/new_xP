@@ -2502,9 +2502,9 @@ st.markdown(
         flex-direction: column;
         flex: 1;
         min-height: 0;
-        padding: 0.65rem 0.75rem 0.7rem;
+        padding: 0.5rem 0.65rem 0.65rem;
         margin-bottom: 0;
-        gap: 0.35rem;
+        gap: 0.2rem;
     }
     .pa-xp-profile-title {
         margin: 0;
@@ -2513,6 +2513,7 @@ st.markdown(
         font-weight: 700;
         letter-spacing: 0.06em;
         text-transform: uppercase;
+        flex-shrink: 0;
     }
     .pa-pillars-card {
         display: flex;
@@ -2788,7 +2789,7 @@ st.markdown(
         gap: 0.35rem;
     }
     .pa-rating-panel {
-        padding: 0.8rem 0.9rem;
+        padding: 0.65rem 0.8rem;
         margin-bottom: 0;
         flex-shrink: 0;
     }
@@ -2991,63 +2992,158 @@ st.markdown(
         display: flex;
         justify-content: center;
         align-items: center;
-        flex: 1;
-        min-height: 7.5rem;
+        flex: 1 1 auto;
+        min-height: 0;
+        width: 100%;
+        padding: 0.1rem 0 0.15rem;
     }
     .pa-xp-radar-img {
-        width: min(100%, 210px);
-        height: auto;
+        width: 100%;
+        max-width: 100%;
+        height: 100%;
+        min-height: 270px;
+        max-height: 360px;
+        object-fit: contain;
         display: block;
     }
     .pa-xp-profile-bars {
         display: flex;
         flex-direction: column;
-        gap: 0.55rem;
-        padding-top: 0.15rem;
+        gap: 0.62rem;
+        padding-top: 0.2rem;
         flex-shrink: 0;
     }
     .pa-xp-gradient-bar-row {
         display: flex;
         flex-direction: column;
-        gap: 0.32rem;
+        gap: 0.38rem;
+    }
+    .pa-xp-gradient-bar-head {
+        display: flex;
+        align-items: center;
+        gap: 0.42rem;
+    }
+    .pa-xp-gradient-bar-head::before {
+        content: "";
+        width: 3px;
+        height: 11px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #c4b5fd 0%, #a855f7 100%);
+        box-shadow: 0 0 8px rgba(168, 85, 247, 0.45);
+        flex-shrink: 0;
     }
     .pa-xp-gradient-bar-label {
-        color: #cbd5e1;
-        font-size: 0.68rem;
+        color: #e2e8f0;
+        font-size: 0.7rem;
         font-weight: 700;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.07em;
         text-transform: uppercase;
+    }
+    .pa-xp-gradient-bar-shell {
+        position: relative;
+        padding: 0.42rem 0.5rem 0.48rem;
+        border-radius: 12px;
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.72) 0%, rgba(10, 16, 30, 0.9) 100%);
+        border: 1px solid rgba(51, 65, 85, 0.75);
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.04),
+            0 8px 18px rgba(2, 6, 23, 0.28);
     }
     .pa-xp-gradient-bar-track {
         position: relative;
         width: 100%;
-        height: 16px;
+        height: 20px;
         border-radius: 999px;
+        overflow: hidden;
         background: linear-gradient(
             90deg,
-            #e2e8f0 0%,
-            #cbd5e1 16%,
-            #fbbf24 52%,
-            #f97316 78%,
+            #f1f5f9 0%,
+            #cbd5e1 14%,
+            #fde68a 38%,
+            #fbbf24 56%,
+            #fb923c 74%,
             #ef4444 100%
         );
-        border: 1px solid rgba(148, 163, 184, 0.35);
-        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.22);
+        box-shadow:
+            inset 0 2px 4px rgba(15, 23, 42, 0.28),
+            inset 0 -1px 0 rgba(255, 255, 255, 0.18);
+    }
+    .pa-xp-gradient-bar-track::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.22) 0%,
+            rgba(255, 255, 255, 0.03) 42%,
+            rgba(0, 0, 0, 0.12) 100%
+        );
+        pointer-events: none;
     }
     .pa-xp-gradient-bar-track.pa-xp-gradient-bar-empty {
         background: linear-gradient(90deg, #334155 0%, #475569 100%);
     }
+    .pa-xp-gradient-bar-glow {
+        position: absolute;
+        top: 50%;
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        filter: blur(10px);
+        opacity: 0.55;
+        z-index: 1;
+    }
+    .pa-xp-gradient-bar-tier-cool .pa-xp-gradient-bar-glow {
+        background: rgba(148, 163, 184, 0.75);
+    }
+    .pa-xp-gradient-bar-tier-warm .pa-xp-gradient-bar-glow {
+        background: rgba(251, 191, 36, 0.85);
+    }
+    .pa-xp-gradient-bar-tier-hot .pa-xp-gradient-bar-glow {
+        background: rgba(239, 68, 68, 0.9);
+    }
     .pa-xp-gradient-bar-marker {
         position: absolute;
         top: 50%;
-        width: 13px;
-        height: 13px;
+        width: 15px;
+        height: 15px;
         border-radius: 50%;
         transform: translate(-50%, -50%);
-        background: #f8fafc;
-        border: 2px solid #0f172a;
-        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28);
+        background: radial-gradient(circle at 35% 30%, #ffffff 0%, #e2e8f0 58%, #cbd5e1 100%);
+        border: 2px solid rgba(15, 23, 42, 0.92);
+        box-shadow:
+            0 0 0 1px rgba(255, 255, 255, 0.42),
+            0 2px 8px rgba(2, 6, 23, 0.45);
         pointer-events: none;
+        z-index: 3;
+    }
+    .pa-xp-gradient-bar-tier-warm .pa-xp-gradient-bar-marker {
+        box-shadow:
+            0 0 0 1px rgba(255, 255, 255, 0.42),
+            0 0 12px rgba(251, 191, 36, 0.55),
+            0 2px 8px rgba(2, 6, 23, 0.45);
+    }
+    .pa-xp-gradient-bar-tier-hot .pa-xp-gradient-bar-marker {
+        box-shadow:
+            0 0 0 1px rgba(255, 255, 255, 0.42),
+            0 0 14px rgba(239, 68, 68, 0.62),
+            0 2px 8px rgba(2, 6, 23, 0.45);
+    }
+    .pa-xp-gradient-bar-ticks {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 0.34rem;
+        padding: 0 0.12rem;
+        pointer-events: none;
+    }
+    .pa-xp-gradient-bar-ticks span {
+        width: 1px;
+        height: 5px;
+        border-radius: 999px;
+        background: rgba(100, 116, 139, 0.55);
     }
     .pa-indices-panel .metric-line:last-child {
         border-bottom: none;
@@ -4786,7 +4882,7 @@ def _xp_archetype_radar_b64(xp_profile: dict | None) -> str:
     angles_closed = np.append(angles, angles[0])
 
     fig, ax = plt.subplots(
-        figsize=(3.35, 3.35),
+        figsize=(5.0, 5.0),
         subplot_kw={"polar": True},
         facecolor="none",
     )
@@ -4794,14 +4890,14 @@ def _xp_archetype_radar_b64(xp_profile: dict | None) -> str:
     ax.set_facecolor("none")
     ax.set_theta_offset(np.pi / 2)
     ax.set_theta_direction(-1)
-    ax.fill(angles_closed, values_closed, color=PA_XP_RADAR_FILL_COLOR, alpha=0.18, zorder=2)
+    ax.fill(angles_closed, values_closed, color=PA_XP_RADAR_FILL_COLOR, alpha=0.22, zorder=2)
     ax.plot(
         angles_closed,
         values_closed,
         color=PA_XP_RADAR_LINE_COLOR,
-        linewidth=2.4,
+        linewidth=2.8,
         linestyle="-",
-        alpha=0.95,
+        alpha=0.96,
         zorder=4,
     )
     for angle, value in zip(angles, values):
@@ -4810,25 +4906,25 @@ def _xp_archetype_radar_b64(xp_profile: dict | None) -> str:
             value,
             marker="o",
             color=PA_XP_RADAR_LINE_COLOR,
-            markersize=5.5,
+            markersize=7.0,
             markeredgecolor="#0f172a",
-            markeredgewidth=0.7,
-            alpha=0.95,
+            markeredgewidth=0.8,
+            alpha=0.96,
             zorder=5,
         )
     ax.set_ylim(3.0, 9.0)
     ax.set_yticks([4, 5, 6, 7, 8])
     ax.set_yticklabels([])
     ax.set_xticks(angles)
-    ax.set_xticklabels(labels, fontsize=7.0, fontweight=600, linespacing=0.9, color="#cbd5e1")
-    ax.tick_params(axis="x", pad=14)
-    ax.grid(color="#334155", alpha=0.45, linewidth=0.6)
+    ax.set_xticklabels(labels, fontsize=8.5, fontweight=600, linespacing=0.9, color="#e2e8f0")
+    ax.tick_params(axis="x", pad=16)
+    ax.grid(color="#334155", alpha=0.42, linewidth=0.65)
     ax.spines["polar"].set_color("#334155")
     ax.spines["polar"].set_alpha(0.55)
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
+    fig.subplots_adjust(left=0.0, right=1.0, top=1.0, bottom=0.0)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=200, transparent=True, bbox_inches="tight", pad_inches=0.06)
+    fig.savefig(buf, format="png", dpi=220, transparent=True, bbox_inches="tight", pad_inches=0.03)
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
@@ -4841,19 +4937,43 @@ def _xp_profile_display_pct(xp_profile: dict, display_key: str) -> float | None:
     return max(0.0, min(100.0, (score - 3.0) / 6.0 * 100.0))
 
 
+def _xp_gradient_bar_tier(pct: float) -> str:
+    if pct >= 72.0:
+        return "hot"
+    if pct >= 45.0:
+        return "warm"
+    return "cool"
+
+
 def _xp_gradient_bar_row_html(label: str, display_key: str, xp_profile: dict) -> str:
     pct = _xp_profile_display_pct(xp_profile, display_key)
     if pct is None:
-        track_html = '<div class="pa-xp-gradient-bar-track pa-xp-gradient-bar-empty"></div>'
-    else:
         track_html = (
+            '<div class="pa-xp-gradient-bar-shell">'
+            '<div class="pa-xp-gradient-bar-track pa-xp-gradient-bar-empty"></div>'
+            '<div class="pa-xp-gradient-bar-ticks" aria-hidden="true">'
+            "<span></span><span></span><span></span><span></span>"
+            "</div>"
+            "</div>"
+        )
+    else:
+        tier = _xp_gradient_bar_tier(pct)
+        track_html = (
+            f'<div class="pa-xp-gradient-bar-shell pa-xp-gradient-bar-tier-{tier}">'
             '<div class="pa-xp-gradient-bar-track">'
+            f'<span class="pa-xp-gradient-bar-glow" style="left:{pct:.1f}%"></span>'
             f'<span class="pa-xp-gradient-bar-marker" style="left:{pct:.1f}%"></span>'
+            "</div>"
+            '<div class="pa-xp-gradient-bar-ticks" aria-hidden="true">'
+            "<span></span><span></span><span></span><span></span>"
+            "</div>"
             "</div>"
         )
     return (
         '<div class="pa-xp-gradient-bar-row">'
+        '<div class="pa-xp-gradient-bar-head">'
         f'<span class="pa-xp-gradient-bar-label">{html.escape(label)}</span>'
+        "</div>"
         f"{track_html}"
         "</div>"
     )
