@@ -5721,8 +5721,7 @@ def _build_player_analysis_layout_html(
 
 
 def render_player_analysis_profile(player: dict, **kwargs) -> None:
-    profile_key = f"pa_profile_{player.get('player_id', 'none')}"
-    st.html(_build_player_analysis_layout_html(player, **kwargs), width="stretch", key=profile_key)
+    st.html(_build_player_analysis_layout_html(player, **kwargs), width="stretch")
 
 
 def _section_grade_body_html(
