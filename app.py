@@ -4603,7 +4603,6 @@ XP_PASSING_SECTION_SPECS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("xp_volume", "Volume", "", ("xp_m4_total", "xp_m4_threat_passes_p90")),
     ("xp_effectiveness", "Effectiveness", "", ("xp_m4_per_pass", "xp_m4_threat_rate")),
     ("xp_short", "Short", "", ("xp_m4_total_short", "xp_m4_threat_short_p90")),
-    ("xp_medium", "Medium", "", ("xp_m4_total_medium", "xp_m4_threat_medium_p90")),
     ("xp_long", "Long", "", ("xp_m4_total_long", "xp_m4_threat_long_p90")),
 )
 
@@ -4614,8 +4613,6 @@ XP_METRIC_LABELS: dict[str, str] = {
     "xp_m4_threat_rate": "% Threat Passes",
     "xp_m4_total_short": "xP Total",
     "xp_m4_threat_short_p90": "xP Threat Passes (Per game)",
-    "xp_m4_total_medium": "xP Total",
-    "xp_m4_threat_medium_p90": "xP Threat Passes (Per game)",
     "xp_m4_total_long": "xP Total",
     "xp_m4_threat_long_p90": "xP Threat Passes (Per game)",
 }
@@ -5405,9 +5402,8 @@ def render_xp_season_rankings(xp_players: list[dict]) -> None:
                 "Jogador": p["player_name"],
                 "Time": p.get("team", "—"),
                 "xP Threat": int(p.get("xp_m4_threat_passes", 0)),
-                "<12m": int(p.get("xp_m4_threat_short", 0)),
-                "12–25m": int(p.get("xp_m4_threat_medium", 0)),
-                ">25m": int(p.get("xp_m4_threat_long", 0)),
+                "≤30m": int(p.get("xp_m4_threat_short", 0)),
+                ">30m": int(p.get("xp_m4_threat_long", 0)),
                 "Taxa %": round(100 * float(p.get("xp_m4_threat_rate", 0)), 1),
             }
             for p in by_threat[:15]
@@ -5805,14 +5801,13 @@ def _scatter_mean_pass_distance(row: dict) -> float:
         return val
     try:
         short = float(row.get("passes_short") or 0.0)
-        medium = float(row.get("passes_medium") or 0.0)
         long_ = float(row.get("passes_long") or 0.0)
     except (TypeError, ValueError):
         return 0.0
-    total = short + medium + long_
+    total = short + long_
     if total <= 0:
         return 0.0
-    return (short * 7.5 + medium * 20.0 + long_ * 32.5) / total
+    return (short * 15.0 + long_ * 35.0) / total
 
 
 def _scatter_marker_sizes(
@@ -6128,9 +6123,8 @@ def render_scatter_section(
     st.caption(
         f"{len(pool)} jogadores elegíveis · mínimo P{xstats.DISTANCE_INDEX_MIN_PASS_PERCENTILE} "
         f"({min_passes_hint or '—'}) · tamanho da bolha = distância média do passe "
-        f"(curto &lt;{xstats.DISTANCE_SHORT_MAX_M:.0f} m · "
-        f"médio {xstats.DISTANCE_SHORT_MAX_M:.0f}–{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
-        f"longo &gt;{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m)"
+        f"(curto {xstats.DISTANCE_BAND_LABELS['short']} · "
+        f"longo {xstats.DISTANCE_BAND_LABELS['long']})"
         f"{highlight_hint}"
     )
 
@@ -6169,9 +6163,8 @@ def render_stats_section(
         f'<p class="stats-player-head">{html.escape(str(profile.get("player_name", "—")))}</p>'
         f'<p class="stats-player-meta">{html.escape(str(profile.get("team", "—")))} · '
         f'{html.escape(str(profile.get("position", "—")))} · {html.escape(group_label)} · '
-        f"Barras = posição no grupo · Curto &lt;{xstats.DISTANCE_SHORT_MAX_M:.0f} m · "
-        f"Médio {xstats.DISTANCE_SHORT_MAX_M:.0f}–{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
-        f"Longo &gt;{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m</p>",
+        f"Barras = posição no grupo · Curto {xstats.DISTANCE_BAND_LABELS['short']} · "
+        f"Longo {xstats.DISTANCE_BAND_LABELS['long']}</p>",
         unsafe_allow_html=True,
     )
     st.html(_build_stats_panel_html(profile), width="stretch")

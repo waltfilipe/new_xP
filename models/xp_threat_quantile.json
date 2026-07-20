@@ -1,16 +1,14 @@
 {
-  "version": "m4_od_12x8_b4_a2_pr0_global_ita_dist15_ridge_preprog_v3",
+  "version": "m4_od_12x8_b4_a2_pr0_global_ita_dist30_ridge_preprog_v4",
   "threat_quantile": 0.1,
   "threat_progress_min": 0.0,
   "residual_thresholds": {
-    "short": 0.12692731269975688,
-    "medium": 0.16907509159286258,
-    "long": 0.22485315014016652
+    "short": 0.15432445553744287,
+    "long": 0.2307948201342841
   },
   "residual_threshold_labels": {
-    "<15 m": 0.12692731269975688,
-    "15\u201325 m": 0.16907509159286258,
-    ">25 m": 0.22485315014016652
+    "\u226430 m": 0.15432445553744287,
+    ">30 m": 0.2307948201342841
   },
   "progress_floor_mult": 0.3,
   "progress_logistic_k": 2.2,

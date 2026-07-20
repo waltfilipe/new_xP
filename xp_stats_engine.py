@@ -36,8 +36,7 @@ XP_COL = "xp_m4"
 THREAT_COL = "is_threat_m4"
 RESIDUAL_COL = "xp_residual"
 DISTANCE_BAND_LABELS = xse.DISTANCE_BAND_LABELS
-DISTANCE_SHORT_MAX_M = pe.DISTANCE_SHORT_MAX_M
-DISTANCE_MEDIUM_MAX_M = pe.DISTANCE_MEDIUM_MAX_M
+XP_DISTANCE_BAND_MAX_SHORT_M = xse.XP_DISTANCE_BAND_MAX_SHORT_M
 BANDS = xse.DISTANCE_BAND_ORDER
 DISTANCE_INDEX_MIN_PASS_PERCENTILE = 20
 
@@ -147,7 +146,7 @@ def _in_penalty_box(x: np.ndarray, y: np.ndarray) -> np.ndarray:
 def _is_long_pass(scored: pd.DataFrame, dist: np.ndarray) -> np.ndarray:
     if "distance_band" in scored.columns:
         return scored["distance_band"].astype(str).to_numpy() == "long"
-    return dist > DISTANCE_MEDIUM_MAX_M
+    return dist > XP_DISTANCE_BAND_MAX_SHORT_M
 
 
 SPECIAL_PASS_MAP_FILTERS: tuple[tuple[str, str], ...] = (
@@ -370,9 +369,6 @@ XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (f"Short ({DISTANCE_BAND_LABELS['short']})", (
         "xp_m4_per_pass_short", "xp_m4_threat_rate_short",
     )),
-    (f"Medium ({DISTANCE_BAND_LABELS['medium']})", (
-        "xp_m4_per_pass_medium", "xp_m4_threat_rate_medium",
-    )),
     (f"Long ({DISTANCE_BAND_LABELS['long']})", (
         "xp_m4_per_pass_long", "xp_m4_threat_rate_long",
     )),
@@ -432,21 +428,15 @@ XP_STATS_LABELS: dict[str, str] = {
     "xp_m4_per_pass": "xP/Passe",
     "xp_m4_threat_rate": "% Threat Passes",
     "xp_m4_per_pass_short": "xP/Passe",
-    "xp_m4_per_pass_medium": "xP/Passe",
     "xp_m4_per_pass_long": "xP/Passe",
     "xp_m4_threat_rate_short": "% Threat Passes",
-    "xp_m4_threat_rate_medium": "% Threat Passes",
     "xp_m4_threat_rate_long": "% Threat Passes",
     "xp_m4_threat_short_p90": "xP Threat Passes (Per game)",
-    "xp_m4_threat_medium_p90": "xP Threat Passes (Per game)",
     "xp_m4_threat_long_p90": "xP Threat Passes (Per game)",
     "passes_short": "Passes na faixa",
-    "passes_medium": "Passes na faixa",
     "passes_long": "Passes na faixa",
     "xp_m4_total_short": "xP Total (Short)",
     "xp_m4_threat_short_p90": "Threat p/game (Short)",
-    "xp_m4_total_medium": "xP Total (Medium)",
-    "xp_m4_threat_medium_p90": "Threat p/game (Medium)",
     "xp_m4_total_long": "xP Total (Long)",
     "xp_m4_threat_long_p90": "Threat p/game (Long)",
     "xp_diagonal_long_total": "Diagonal Longa (xP)",
@@ -492,7 +482,6 @@ def iter_stats_metric_options() -> tuple[tuple[str, str], ...]:
 SCATTER_BAND_OPTIONS: tuple[tuple[str, str], ...] = (
     ("total", "Total"),
     ("short", f"Short ({DISTANCE_BAND_LABELS['short']})"),
-    ("medium", f"Medium ({DISTANCE_BAND_LABELS['medium']})"),
     ("long", f"Long ({DISTANCE_BAND_LABELS['long']})"),
 )
 SCATTER_BANDED_BASE_KEYS: frozenset[str] = frozenset({
@@ -508,11 +497,10 @@ SCATTER_EXTRA_BASE_KEYS: tuple[tuple[str, str], ...] = (
 
 
 def _is_scatter_band_variant_key(key: str) -> bool:
-    if key.endswith(("_short", "_medium", "_long")):
+    if key.endswith(("_short", "_long")):
         return True
     return key in {
         "xp_m4_threat_short_p90",
-        "xp_m4_threat_medium_p90",
         "xp_m4_threat_long_p90",
     }
 
@@ -549,7 +537,6 @@ def scatter_axis_label(base_key: str, band: str) -> str:
 THREAT_PASS_MAP_FILTERS: tuple[tuple[str, str], ...] = (
     ("all", "Total"),
     ("short", f"Short ({DISTANCE_BAND_LABELS['short']})"),
-    ("medium", f"Medium ({DISTANCE_BAND_LABELS['medium']})"),
     ("long", f"Long ({DISTANCE_BAND_LABELS['long']})"),
 )
 THREAT_PASS_MAP_FILTER_KEYS: tuple[str, ...] = tuple(key for key, _label in THREAT_PASS_MAP_FILTERS)

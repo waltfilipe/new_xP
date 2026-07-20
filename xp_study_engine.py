@@ -52,11 +52,11 @@ THREAT_XP_THRESHOLDS: dict[str, float] = {
     XP_MODEL_HIER_OD: 0.50,
 }
 
-DISTANCE_BAND_ORDER: tuple[str, ...] = ("short", "medium", "long")
+DISTANCE_BAND_ORDER: tuple[str, ...] = ("short", "long")
+XP_DISTANCE_BAND_MAX_SHORT_M = 30.0
 DISTANCE_BAND_LABELS: dict[str, str] = {
-    "short": "<15 m",
-    "medium": "15–25 m",
-    "long": ">25 m",
+    "short": "≤30 m",
+    "long": ">30 m",
 }
 
 
@@ -666,9 +666,7 @@ def normalize_xp_model(model: str | None) -> str:
 
 def _distance_band_series(distances: pd.Series | np.ndarray) -> pd.Series:
     dist = np.asarray(distances, dtype=float)
-    bands = np.full(len(dist), "medium", dtype=object)
-    bands[dist < pe.DISTANCE_SHORT_MAX_M] = "short"
-    bands[dist > pe.DISTANCE_MEDIUM_MAX_M] = "long"
+    bands = np.where(dist <= XP_DISTANCE_BAND_MAX_SHORT_M, "short", "long")
     return pd.Series(bands, index=getattr(distances, "index", None))
 
 
