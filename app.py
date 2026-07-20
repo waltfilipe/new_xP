@@ -3799,12 +3799,19 @@ def _coerce_position_block_id(
     return block_id
 
 
-def _legacy_position_select_widget_key(key_prefix: str) -> str:
+def _position_select_widget_key(key_prefix: str) -> str:
     return f"{key_prefix}_position_select"
 
 
 def _position_block_prev_key(state_key: str) -> str:
     return f"{state_key}__prev"
+
+
+def _read_position_block_state(
+    state_key: str,
+    blocks: tuple[tuple[str, str, frozenset[str] | None, str | None], ...],
+) -> str:
+    return _coerce_position_block_id(st.session_state.get(state_key), blocks)
 
 
 def _sync_position_block_state(
@@ -3814,15 +3821,10 @@ def _sync_position_block_state(
     key_prefix: str,
     blocks: tuple[tuple[str, str, frozenset[str] | None, str | None], ...] = PLAYER_ANALYSIS_POSITION_BLOCKS,
 ) -> None:
-    st.session_state[state_key] = _coerce_position_block_id(block_id, blocks)
-    st.session_state.pop(_legacy_position_select_widget_key(key_prefix), None)
+    coerced = _coerce_position_block_id(block_id, blocks)
+    st.session_state[state_key] = coerced
+    st.session_state[_position_select_widget_key(key_prefix)] = coerced
     st.session_state.pop(_position_block_prev_key(state_key), None)
-
-
-def _clear_legacy_position_select_widgets() -> None:
-    for key in list(st.session_state.keys()):
-        if key.endswith("_position_select"):
-            st.session_state.pop(key, None)
 
 
 def _render_position_block_slicer(
@@ -3834,11 +3836,13 @@ def _render_position_block_slicer(
 ) -> tuple[frozenset[str], frozenset[str]]:
     block_ids = [block_id for block_id, *_rest in blocks]
     labels_by_id = {block_id: label for block_id, label, *_rest in blocks}
-    legacy_select_key = _legacy_position_select_widget_key(key_prefix)
-    if state_key not in st.session_state and legacy_select_key in st.session_state:
-        st.session_state[state_key] = st.session_state[legacy_select_key]
-    st.session_state[state_key] = _coerce_position_block_id(st.session_state.get(state_key), blocks)
-    st.session_state.pop(legacy_select_key, None)
+    widget_key = _position_select_widget_key(key_prefix)
+
+    st.session_state[state_key] = _read_position_block_state(state_key, blocks)
+    canonical_block = st.session_state[state_key]
+
+    if widget_key not in st.session_state:
+        st.session_state[widget_key] = canonical_block
 
     prev_key = _position_block_prev_key(state_key)
     previous_block = st.session_state.get(prev_key)
@@ -3847,8 +3851,11 @@ def _render_position_block_slicer(
         "Posição",
         options=block_ids,
         format_func=lambda block_id: labels_by_id.get(block_id, block_id),
-        key=state_key,
+        key=widget_key,
     )
+
+    if selected_block != canonical_block:
+        st.session_state[state_key] = selected_block
 
     if previous_block is not None and previous_block != selected_block:
         if state_key == PLAYER_ANALYSIS_POSITION_BLOCKS_KEY:
