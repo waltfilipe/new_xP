@@ -27,6 +27,7 @@ LINE_BREAK_DIST_MAX_M = 25.0
 CROSS_DIST_MIN_M = 15.0
 CROSS_LATERAL_DELTA_MIN_M = 8.0
 CROSS_MAX_START_X = 102.0
+FROM_DEEP_DIST_MIN_M = 15.0
 PENALTY_X_MIN = pe.PENALTY_BOX_X_MIN
 PENALTY_Y_MIN = pe.PENALTY_BOX_Y_MIN
 PENALTY_Y_MAX = pe.PENALTY_BOX_Y_MAX
@@ -194,6 +195,7 @@ def compute_special_pass_masks(scored: pd.DataFrame) -> dict[str, np.ndarray]:
     dy = y_end - y_start
 
     start_zone = _zone_x(x_start)
+    end_zone = _zone_x(x_end)
     long_pass = _is_long_pass(scored, dist)
     lateral_start = _is_lateral_corridor(y_start)
     lateral_end = _is_lateral_corridor(y_end)
@@ -223,7 +225,11 @@ def compute_special_pass_masks(scored: pd.DataFrame) -> dict[str, np.ndarray]:
             & (dist >= CROSS_DIST_MIN_M)
             & (np.abs(dy) >= CROSS_LATERAL_DELTA_MIN_M)
         ),
-        "from_deep": start_zone == "def",
+        "from_deep": (
+            (start_zone == "def")
+            & (end_zone == "att")
+            & (dist >= FROM_DEEP_DIST_MIN_M)
+        ),
         "final_third": start_zone == "att",
         "in_box": in_box,
     }
