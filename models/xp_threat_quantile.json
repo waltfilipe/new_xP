@@ -1,22 +1,23 @@
 {
-  "version": "m4_od_12x8_b4_a2_pr0_global_ita_dist15_v1",
+  "version": "m4_od_12x8_b4_a2_pr0_global_ita_dist15_ridge_global_v2",
   "threat_quantile": 0.1,
   "threat_progress_min": 0.0,
   "residual_thresholds": {
-    "short": 0.12798027420904143,
-    "medium": 0.1297588217549716,
-    "long": 0.16387512328444895
+    "short": 0.1233308258153189,
+    "medium": 0.12735293377270013,
+    "long": 0.1707313638935155
   },
   "residual_threshold_labels": {
-    "<15 m": 0.12798027420904143,
-    "15\u201325 m": 0.1297588217549716,
-    ">25 m": 0.16387512328444895
+    "<15 m": 0.1233308258153189,
+    "15\u201325 m": 0.12735293377270013,
+    ">25 m": 0.1707313638935155
   },
   "progress_floor_mult": 0.3,
   "progress_logistic_k": 2.2,
   "blend_alpha": 0.0,
   "grid": "12x8",
-  "team_surface": "season_b4",
-  "training_passes": 95128,
-  "training_matches": 156
+  "training_pool": "global",
+  "team_surface": "global_reference_only",
+  "training_passes": 754590,
+  "training_matches": 1088
 }

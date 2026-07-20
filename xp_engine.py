@@ -16,7 +16,7 @@ from sklearn.pipeline import Pipeline
 import passes_engine as pe
 import xp_study_engine as xse
 
-XP_DATA_CACHE_VERSION = 23
+XP_DATA_CACHE_VERSION = 24
 XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total",
     "xp_m4_per_pass",
@@ -29,7 +29,7 @@ XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total_long",
     "xp_m4_threat_long_p90",
 )
-XP_MODEL_VERSION = "m4_od_12x8_b4_a2_pr0_global_ita_dist15_v1"
+XP_MODEL_VERSION = "m4_od_12x8_b4_a2_pr0_global_ita_dist15_ridge_global_v2"
 THREAT_QUANTILE = 0.10
 THREAT_PROGRESS_MIN = 0.0
 XP_COL = "xp_m4"
@@ -170,11 +170,11 @@ def _build_team_season_od_maps(
     return team_season_od, team_n_matches
 
 
-def _score_serie_b_b4_completed(
+def _score_frame_completed(
     frame: pd.DataFrame,
     league_ref: dict[str, np.ndarray | float | int],
-    team_season_od: dict[str, np.ndarray],
-    team_n_matches: dict[str, int],
+    team_season_od: dict[str, np.ndarray] | None = None,
+    team_n_matches: dict[str, int] | None = None,
 ) -> pd.DataFrame:
     chunks: list[pd.DataFrame] = []
     for eid in frame["event_id"].astype(int).unique():
@@ -182,8 +182,8 @@ def _score_serie_b_b4_completed(
         scored = score_match_passes_m4(
             mf,
             league_ref,
-            team_season_od=team_season_od,
-            team_n_matches=team_n_matches,
+            team_season_od=team_season_od or {},
+            team_n_matches=team_n_matches or {},
         )
         if scored.empty:
             continue
@@ -233,7 +233,8 @@ def _fit_artifacts_on_passes(train_passes: pd.DataFrame) -> dict:
         "progress_logistic_k": xse.XP_PROGRESS_LOGISTIC_K,
         "blend_alpha": xse.XP_BLEND_ALPHA,
         "grid": "12x8",
-        "team_surface": "season_b4",
+        "training_pool": "global",
+        "team_surface": "global_reference_only",
         "training_passes": int(len(train)),
         "training_matches": int(train["event_id"].nunique()) if "event_id" in train.columns else 0,
     }
@@ -242,8 +243,21 @@ def _fit_artifacts_on_passes(train_passes: pd.DataFrame) -> dict:
     return meta
 
 
+def _load_global_scored_completed_passes() -> pd.DataFrame:
+    """Score completed passes from the global multi-league pool for Ridge training."""
+    league_ref = xse._league_reference_surfaces(
+        GRID.dest_cols, GRID.dest_rows,
+        GRID.od_origin_cols, GRID.od_origin_rows,
+        GRID.od_dest_cols, GRID.od_dest_rows,
+    )
+    frame = xse._load_combined_league_pass_frame()
+    if frame.empty:
+        raise RuntimeError("No passes available in the global xP reference pool.")
+    return _score_frame_completed(frame, league_ref)
+
+
 def fit_and_save_artifacts(*, force: bool = False) -> dict:
-    """Train expected-xP ridge and quantile threat thresholds on Serie B B4-scored passes."""
+    """Train expected-xP ridge and quantile threat thresholds on the global pass pool."""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -257,20 +271,9 @@ def fit_and_save_artifacts(*, force: bool = False) -> dict:
         if str(meta.get("version", "")) == XP_MODEL_VERSION:
             return meta
 
-    league_ref = xse._league_reference_surfaces(
-        GRID.dest_cols, GRID.dest_rows,
-        GRID.od_origin_cols, GRID.od_origin_rows,
-        GRID.od_dest_cols, GRID.od_dest_rows,
-    )
-    frame = pe._load_season_pass_frame()
-    if frame.empty:
-        raise RuntimeError("No Serie B passes available for xP artifact training.")
-    team_season_od, team_n_matches = _build_team_season_od_maps(frame)
-    league_passes = _score_serie_b_b4_completed(
-        frame, league_ref, team_season_od, team_n_matches,
-    )
+    league_passes = _load_global_scored_completed_passes()
     if league_passes.empty:
-        raise RuntimeError("No B4-scored Serie B passes available for xP artifact training.")
+        raise RuntimeError("No globally scored passes available for xP artifact training.")
     return _fit_artifacts_on_passes(league_passes)
 
 
@@ -336,8 +339,8 @@ def build_serie_b_season_passes(*, force_artifacts: bool = False) -> pd.DataFram
         scored = score_match_passes_m4(
             mf,
             league_ref,
-            team_season_od=team_season_od,
-            team_n_matches=team_n_matches,
+            team_season_od=team_season_od or {},
+            team_n_matches=team_n_matches or {},
         )
         if scored.empty:
             continue
@@ -356,9 +359,9 @@ def build_serie_b_season_passes(*, force_artifacts: bool = False) -> pd.DataFram
         need_fit = True
 
     if need_fit:
-        comp = season_raw[season_raw["is_won"] & season_raw["has_end"]].copy()
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
-        _fit_artifacts_on_passes(comp)
+        global_passes = _load_global_scored_completed_passes()
+        _fit_artifacts_on_passes(global_passes)
 
     season = apply_expected_and_threat(season_raw)
     DATA_DIR.mkdir(parents=True, exist_ok=True)

@@ -300,8 +300,15 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
 
     if RESIDUAL_COL in scored.columns:
         residual = scored[RESIDUAL_COL].to_numpy(dtype=float)
-        out["xp_residual_positive"] = float(np.maximum(residual, 0.0).sum())
-        out["xp_residual_negative"] = float(np.minimum(residual, 0.0).sum())
+        n = len(residual)
+        if n:
+            out["xp_residual_positive"] = float(np.maximum(residual, 0.0).sum()) / n
+            out["xp_residual_negative"] = float(np.minimum(residual, 0.0).sum()) / n
+            out["xp_residual_mean"] = float(residual.mean())
+        else:
+            out["xp_residual_positive"] = 0.0
+            out["xp_residual_negative"] = 0.0
+            out["xp_residual_mean"] = 0.0
         out["xp_surprise_rate"] = float((residual > 0).mean())
         p75 = float(np.quantile(xp, 0.75)) if n else 0.0
         high_xp = xp >= p75
@@ -315,6 +322,7 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
     else:
         out["xp_residual_positive"] = 0.0
         out["xp_residual_negative"] = 0.0
+        out["xp_residual_mean"] = 0.0
         out["xp_surprise_rate"] = 0.0
         out["xp_threat_conversion"] = 0.0
         out["xp_threat_mean_xp"] = 0.0
@@ -378,7 +386,7 @@ XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "xp_from_deep", "special_from_deep_p90",
     )),
     ("Qualidade e threat", (
-        "xp_residual_positive", "xp_residual_negative", "xp_surprise_rate",
+        "xp_residual_mean", "xp_residual_positive", "xp_residual_negative", "xp_surprise_rate",
         "xp_threat_conversion", "xp_threat_mean_xp", "xp_threat_mean_residual",
         "xp_m4_p90", "xp_max_pass",
     )),
@@ -453,8 +461,9 @@ XP_STATS_LABELS: dict[str, str] = {
     "special_in_box_p90": "Na área (Per game)",
     "xp_from_deep": "xP from deep",
     "special_from_deep_p90": "From deep (Per game)",
-    "xp_residual_positive": "xP acima do esperado",
-    "xp_residual_negative": "xP abaixo do esperado",
+    "xp_residual_mean": "Resíduo médio / passe",
+    "xp_residual_positive": "xP acima do esperado / passe",
+    "xp_residual_negative": "xP abaixo do esperado / passe",
     "xp_surprise_rate": "Surprise rate",
     "xp_threat_conversion": "Threat conversion",
     "xp_threat_mean_xp": "Mean threat xP",
@@ -731,6 +740,8 @@ def format_stats_value(key: str, value: float | int | None) -> str:
         return f"{val:.3f}"
     if key == "xp_m4_per_pass":
         return f"{val:.3f}"
+    if key.startswith("xp_residual"):
+        return f"{val:+.4f}"
     if key.endswith("_p90") or key == "xp_per_90" or key == "xp_game_mean" or key == "xp_game_std":
         return f"{val:.2f}"
     if key == "xp_pass_cv" or key == "xp_pass_std":
