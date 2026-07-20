@@ -16,7 +16,7 @@ from sklearn.pipeline import Pipeline
 import passes_engine as pe
 import xp_study_engine as xse
 
-XP_DATA_CACHE_VERSION = 25
+XP_DATA_CACHE_VERSION = 26
 XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total",
     "xp_m4_per_pass",
@@ -29,10 +29,11 @@ XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total_long",
     "xp_m4_threat_long_p90",
 )
-XP_MODEL_VERSION = "m4_od_12x8_b4_a2_pr0_global_ita_dist15_ridge_global_v2"
+XP_MODEL_VERSION = "m4_od_12x8_b4_a2_pr0_global_ita_dist15_ridge_preprog_v3"
 THREAT_QUANTILE = 0.10
 THREAT_PROGRESS_MIN = 0.0
 XP_COL = "xp_m4"
+XP_SPATIAL_COL = "xp_hier_od"
 XP_EXPECTED_COL = "xp_expected"
 XP_RESIDUAL_COL = "xp_residual"
 THREAT_COL = "is_threat_m4"
@@ -98,10 +99,9 @@ def _progress_ratio_array(df: pd.DataFrame) -> np.ndarray:
 
 
 def _build_design_matrix(df: pd.DataFrame, grid: xse.GridConfig = GRID) -> sparse.csr_matrix:
+    """Spatial features only: distance + origin/destination cells (no progress)."""
     dist = df["pass_distance"].to_numpy(dtype=float)
     dist_feats = np.column_stack([dist, dist ** 2, np.sqrt(dist)])
-    progress = _progress_ratio_array(df)
-    progress_feats = np.column_stack([progress, progress ** 2])
     n = len(df)
     o_idx = df["oy"].to_numpy(int) * grid.od_origin_cols + df["ox"].to_numpy(int)
     d_idx = df["dy"].to_numpy(int) * grid.od_dest_cols + df["dx"].to_numpy(int)
@@ -109,10 +109,21 @@ def _build_design_matrix(df: pd.DataFrame, grid: xse.GridConfig = GRID) -> spars
     n_d = _n_dest_cells()
     return sparse.hstack([
         sparse.csr_matrix(dist_feats),
-        sparse.csr_matrix(progress_feats),
         sparse.csr_matrix((np.ones(n), (np.arange(n), o_idx)), shape=(n, n_o)),
         sparse.csr_matrix((np.ones(n), (np.arange(n), d_idx)), shape=(n, n_d)),
     ])
+
+
+def _progress_multiplier_array(df: pd.DataFrame) -> np.ndarray:
+    if "xp_progress_mult" in df.columns:
+        return df["xp_progress_mult"].to_numpy(dtype=float)
+    return xse.progress_toward_goal_multiplier(_progress_ratio_array(df))
+
+
+def _expected_xp_from_model(model: Pipeline, df: pd.DataFrame) -> np.ndarray:
+    """Expected xP = Ridge(spatial) × same progress multiplier as Model 4."""
+    spatial = np.maximum(model.predict(_build_design_matrix(df)), 0.0)
+    return spatial * _progress_multiplier_array(df)
 
 
 def score_match_passes_m4(
@@ -205,15 +216,17 @@ def _fit_artifacts_on_passes(train_passes: pd.DataFrame) -> dict:
         raise RuntimeError("No completed passes available for xP artifact training.")
 
     X = _build_design_matrix(train)
-    y = train[XP_COL].to_numpy(dtype=float)
+    if XP_SPATIAL_COL not in train.columns:
+        raise RuntimeError(f"Missing {XP_SPATIAL_COL} for Ridge training.")
+    y = train[XP_SPATIAL_COL].to_numpy(dtype=float)
     model = Pipeline([
         ("ridge", Ridge(alpha=10.0, solver="lsqr")),
     ])
     model.fit(X, y)
     joblib.dump(model, RIDGE_MODEL_PATH)
 
-    train[XP_EXPECTED_COL] = model.predict(X)
-    train[XP_RESIDUAL_COL] = train[XP_COL].to_numpy() - train[XP_EXPECTED_COL]
+    train[XP_EXPECTED_COL] = _expected_xp_from_model(model, train)
+    train[XP_RESIDUAL_COL] = train[XP_COL].to_numpy(dtype=float) - train[XP_EXPECTED_COL]
 
     thresholds: dict[str, float] = {}
     for band in BANDS:
@@ -235,6 +248,8 @@ def _fit_artifacts_on_passes(train_passes: pd.DataFrame) -> dict:
         "grid": "12x8",
         "training_pool": "global",
         "team_surface": "global_reference_only",
+        "ridge_target": XP_SPATIAL_COL,
+        "expected_formula": "ridge_spatial * xp_progress_mult",
         "training_passes": int(len(train)),
         "training_matches": int(train["event_id"].nunique()) if "event_id" in train.columns else 0,
     }
@@ -304,8 +319,7 @@ def apply_expected_and_threat(passes: pd.DataFrame) -> pd.DataFrame:
     thresholds = load_threat_thresholds()
     sub_idx = out.index[mask]
     sub = out.loc[mask]
-    X = _build_design_matrix(sub)
-    expected = model.predict(X)
+    expected = _expected_xp_from_model(model, sub)
     residual = sub[XP_COL].to_numpy(dtype=float) - expected
     out.loc[sub_idx, XP_EXPECTED_COL] = expected
     out.loc[sub_idx, XP_RESIDUAL_COL] = residual
