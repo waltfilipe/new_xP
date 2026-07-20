@@ -140,7 +140,12 @@ from progression_maps import (
 xpe = _load_xp_study_engine()
 xe = _load_xp_engine()
 xstats = _load_xp_stats_engine()
-from xp_study_maps import draw_special_passes_season_map, draw_top_xp_passes_map, draw_xp_destination_surface
+from xp_study_maps import (
+    build_special_passes_season_map_figure,
+    draw_special_passes_season_map,
+    draw_top_xp_passes_map,
+    draw_xp_destination_surface,
+)
 
 XP_DATA_CACHE_VERSION = xe.XP_DATA_CACHE_VERSION
 
@@ -2419,8 +2424,9 @@ st.markdown(
         margin: 0 0 0.65rem 0;
     }
     .pa-maps-grid-row [data-testid="stImage"] img,
-    .pa-maps-compact [data-testid="stPyplot"] {
-        max-height: 220px;
+    .pa-maps-compact [data-testid="stPyplot"],
+    .pa-maps-compact [data-testid="stPlotlyChart"] {
+        max-height: 360px;
         object-fit: contain;
     }
     .pa-stats-filter {
@@ -6160,14 +6166,21 @@ def render_maps_section(
     if passes_df is None or passes_df.empty:
         st.info("Nenhum passe completo para este jogador com o filtro selecionado.")
     else:
-        fig = draw_special_passes_season_map(
+        fig = build_special_passes_season_map_figure(
             passes_df,
             player_name=str(player.get("player_name", "—")),
             season_label=APP_LEAGUE,
             category_label=xstats.special_pass_map_label(special_pass_key),
         )
-        st.pyplot(fig, clear_figure=True, use_container_width=True)
-        st.caption(f"{len(passes_df)} passes completos exibidos")
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config={"displayModeBar": False, "responsive": True},
+        )
+        st.caption(
+            f"{len(passes_df)} passes completos exibidos · passe o mouse na origem (círculo) "
+            "para ver xP e diferença vs esperado"
+        )
     st.markdown("</div>", unsafe_allow_html=True)
 
 
