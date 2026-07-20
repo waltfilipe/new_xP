@@ -407,6 +407,45 @@ XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
 )
 
+# Player Analysis passing blocks (Volume → Consistência)
+XP_PLAYER_ANALYSIS_BLOCKS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Volume", ("xp_per_90",)),
+    ("Efetividade", (
+        "xp_m4_per_pass", "xp_m4_threat_rate",
+        "xp_m4_per_pass_short", "xp_m4_threat_rate_short",
+        "xp_m4_per_pass_long", "xp_m4_threat_rate_long",
+    )),
+    ("Criação", (
+        "xp_final_third_share", "threat_final_third_p90",
+        "xp_box_share", "threat_in_box_p90",
+        "xp_from_deep", "threat_from_deep_p90",
+    )),
+    ("Padrões", (
+        "special_diagonal_long_p90", "xp_diagonal_long_total",
+        "special_line_break_p90", "xp_line_break_total",
+        "special_inversion_p90", "xp_inversion_total",
+        "special_cross_p90", "xp_cross_total",
+    )),
+    ("Qualidade", (
+        "xp_residual_mean", "xp_residual_positive", "xp_surprise_rate",
+    )),
+    ("Consistência", (
+        "xp_game_mean", "xp_game_std", "xp_games_above_median_pct",
+    )),
+)
+
+XP_COMPOSITE_INDEX_KEYS: tuple[str, ...] = (
+    "xp_builder_index",
+    "xp_creator_index",
+    "xp_progressor_index",
+    "xp_finisher_pass_index",
+)
+
+
+def iter_xp_player_analysis_blocks() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Yield (title, keys) for every Player Analysis passing block."""
+    return XP_PLAYER_ANALYSIS_BLOCKS
+
 
 def p20_pass_thresholds_by_group(
     players: list[dict],
@@ -485,6 +524,10 @@ XP_STATS_LABELS: dict[str, str] = {
     "xp_pass_cv": "xP CV (passes)",
     "xp_games_above_median_pct": "% Jogos acima da mediana",
     "xp_pass_std": "Desvio xP (passes)",
+    "xp_builder_index": "Builder",
+    "xp_creator_index": "Creator",
+    "xp_progressor_index": "Progressor",
+    "xp_finisher_pass_index": "Finisher-pass",
 }
 
 def iter_stats_metric_options() -> tuple[tuple[str, str], ...]:
@@ -592,6 +635,14 @@ XP_STATS_RANK_METRICS: tuple[str, ...] = tuple(
     )
 )
 
+XP_PLAYER_ANALYSIS_RANK_METRICS: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        key
+        for _title, keys in XP_PLAYER_ANALYSIS_BLOCKS
+        for key in keys
+    ) | dict.fromkeys(XP_COMPOSITE_INDEX_KEYS)
+)
+
 
 def _zscore(series: pd.Series) -> pd.Series:
     std = float(series.std())
@@ -644,8 +695,14 @@ def _apply_volume_grade_penalty(grade: str, volume_rank_pct: float) -> str:
     return _grade_from_tier_value(float(max(1, tier)))
 
 
+def _series_or_zero(df: pd.DataFrame, col: str) -> pd.Series:
+    if col in df.columns:
+        return df[col].astype(float)
+    return pd.Series(0.0, index=df.index)
+
+
 def attach_composite_indices(players: list[dict]) -> None:
-    """Within-position z-score composites."""
+    """Within-position z-score composites for Player Analysis indices."""
     if not players:
         return
     pools: dict[str, list[dict]] = {}
@@ -655,20 +712,31 @@ def attach_composite_indices(players: list[dict]) -> None:
 
     for rows in pools.values():
         df = pd.DataFrame(rows)
-        z_total = _zscore(df["xp_m4_total"].astype(float))
-        z_threat_p90 = _zscore(df["xp_m4_threat_passes_p90"].astype(float))
-        z_threat_rate = _zscore(df["xp_m4_threat_rate"].astype(float))
-        z_prog = _zscore(df.get("xp_prog_total", pd.Series(0.0, index=df.index)).astype(float))
-        z_long_threat = _zscore(df.get("xp_m4_threat_long_p90", pd.Series(0.0, index=df.index)).astype(float))
-        z_deep = _zscore(df.get("xp_from_deep", pd.Series(0.0, index=df.index)).astype(float))
-        z_att = _zscore(df.get("xp_total_att", pd.Series(0.0, index=df.index)).astype(float))
-        z_short_prog = _zscore(df.get("xp_m4_total_short", pd.Series(0.0, index=df.index)).astype(float))
+        z_deep = _zscore(_series_or_zero(df, "xp_from_deep"))
+        z_line_break = _zscore(_series_or_zero(df, "xp_line_break_total"))
+        z_short_threat_rate = _zscore(_series_or_zero(df, "xp_m4_threat_rate_short"))
+        z_final_third_share = _zscore(_series_or_zero(df, "xp_final_third_share"))
+        z_threat_final_third = _zscore(_series_or_zero(df, "threat_final_third_p90"))
+        z_per_pass = _zscore(_series_or_zero(df, "xp_m4_per_pass"))
+        z_per_pass_long = _zscore(_series_or_zero(df, "xp_m4_per_pass_long"))
+        z_diag_long = _zscore(_series_or_zero(df, "xp_diagonal_long_total"))
+        z_box_share = _zscore(_series_or_zero(df, "xp_box_share"))
+        z_threat_in_box = _zscore(_series_or_zero(df, "threat_in_box_p90"))
+        z_cross = _zscore(_series_or_zero(df, "xp_cross_total"))
 
         for i, row in enumerate(rows):
-            row["xp_threat_index"] = float(z_total.iloc[i] + z_threat_p90.iloc[i] + z_threat_rate.iloc[i])
-            row["xp_progressive_index"] = float(z_prog.iloc[i] + z_long_threat.iloc[i])
-            row["xp_creator_score"] = float(z_att.iloc[i] + z_threat_p90.iloc[i] + z_long_threat.iloc[i])
-            row["xp_builder_score"] = float(z_deep.iloc[i] + z_short_prog.iloc[i])
+            row["xp_builder_index"] = float(
+                z_deep.iloc[i] + z_line_break.iloc[i] + z_short_threat_rate.iloc[i]
+            )
+            row["xp_creator_index"] = float(
+                z_final_third_share.iloc[i] + z_threat_final_third.iloc[i] + z_per_pass.iloc[i]
+            )
+            row["xp_progressor_index"] = float(
+                z_per_pass_long.iloc[i] + z_diag_long.iloc[i] + z_deep.iloc[i]
+            )
+            row["xp_finisher_pass_index"] = float(
+                z_box_share.iloc[i] + z_threat_in_box.iloc[i] + z_cross.iloc[i]
+            )
 
 
 def attach_distance_indices(players: list[dict]) -> None:
@@ -783,14 +851,17 @@ def distance_index_grade_for_profile(profile: dict, band: str) -> str | None:
 
 
 def attach_all_stats_ranks(players: list[dict]) -> None:
-    """Rank every stats-tab metric within position group."""
+    """Rank every stats-tab and Player Analysis metric within position group."""
     pools: dict[str, list[dict]] = {}
     for player in players:
         group = str(player.get("position_group") or "CM")
         pools.setdefault(group, []).append(player)
+    rank_metrics = tuple(
+        dict.fromkeys((*XP_STATS_RANK_METRICS, *XP_PLAYER_ANALYSIS_RANK_METRICS))
+    )
     for rows in pools.values():
         pool_size = len(rows)
-        for metric in XP_STATS_RANK_METRICS:
+        for metric in rank_metrics:
             if metric.startswith("xp_dist_index_"):
                 continue
             rows.sort(key=lambda row: float(row.get(metric) or 0.0), reverse=True)
@@ -845,4 +916,6 @@ def format_stats_value(key: str, value: float | int | None) -> str:
         return f"{val:.3f}"
     if key == "xp_max_pass" or key == "xp_m4_p90":
         return f"{val:.3f}"
+    if key in XP_COMPOSITE_INDEX_KEYS:
+        return f"{val:+.2f}"
     return f"{val:.1f}"

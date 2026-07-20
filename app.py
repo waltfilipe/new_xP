@@ -2957,6 +2957,13 @@ st.markdown(
     .pa-pillar-group-empty {
         min-height: 2.5rem;
     }
+    .pa-archetype-panel,
+    .pa-indices-panel {
+        padding: 0.35rem 0.55rem 0.45rem;
+    }
+    .pa-indices-panel .metric-line:last-child {
+        border-bottom: none;
+    }
     .pa-placeholder-note {
         margin: 0.15rem 0 0;
         color: #64748b;
@@ -4599,43 +4606,20 @@ def _xp_metric_ranks_dict(xp_profile: dict | None) -> dict:
     return ranks
 
 
-XP_PASSING_SECTION_SPECS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    ("xp_volume", "Volume", "", ("xp_m4_total", "xp_m4_threat_passes_p90")),
-    ("xp_effectiveness", "Effectiveness", "", ("xp_m4_per_pass", "xp_m4_threat_rate")),
-    ("xp_short", "Short", "", ("xp_m4_total_short", "xp_m4_threat_short_p90")),
-    ("xp_long", "Long", "", ("xp_m4_total_long", "xp_m4_threat_long_p90")),
+XP_PASSING_SECTION_SPECS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = tuple(
+    (f"pa_{title.lower().replace(' ', '_').replace('ç', 'c').replace('ã', 'a')}", title, "", keys)
+    for title, keys in xstats.XP_PLAYER_ANALYSIS_BLOCKS
 )
 
-XP_METRIC_LABELS: dict[str, str] = {
-    "xp_m4_total": "xP Total",
-    "xp_m4_per_pass": "xP/Passe",
-    "xp_m4_threat_passes_p90": "xP Threat Passes (Per game)",
-    "xp_m4_threat_rate": "% Threat Passes",
-    "xp_m4_total_short": "xP Total",
-    "xp_m4_threat_short_p90": "xP Threat Passes (Per game)",
-    "xp_m4_total_long": "xP Total",
-    "xp_m4_threat_long_p90": "xP Threat Passes (Per game)",
-}
-
-XP_COMPARE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = tuple(
-    (title, keys) for _key, title, _subtitle, keys in XP_PASSING_SECTION_SPECS
-)
+XP_COMPARE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = xstats.XP_PLAYER_ANALYSIS_BLOCKS
 
 
 def _xp_metric_label(key: str) -> str:
-    return XP_METRIC_LABELS.get(key, key)
+    return xstats.stats_metric_label(key)
 
 
 def _xp_stat_display(profile: dict, key: str) -> str:
-    if key.startswith("xp_m4_total"):
-        return f"{float(profile.get(key, 0)):.1f}"
-    if key == "xp_m4_per_pass":
-        return f"{float(profile.get(key, 0)):.3f}"
-    if key.endswith("_p90"):
-        return f"{float(profile.get(key, 0)):.2f}"
-    if key == "xp_m4_threat_rate" or key.startswith("xp_m4_threat_rate_"):
-        return f"{100 * float(profile.get(key, 0)):.1f}%"
-    return "—"
+    return xstats.format_stats_value(key, profile.get(key))
 
 
 def _xp_stat_numeric_value(profile: dict, key: str) -> float | None:
@@ -4646,6 +4630,87 @@ def _xp_stat_numeric_value(profile: dict, key: str) -> float | None:
         return float(val)
     except (TypeError, ValueError):
         return None
+
+
+_ARCHETYPE_STYLE_CLASS: dict[str, str] = {
+    "build": "pa-archetype-build",
+    "vertical": "pa-archetype-vertical",
+    "carry": "pa-archetype-carry",
+    "attack": "pa-archetype-attack",
+    "link": "pa-archetype-link",
+    "reference": "pa-archetype-reference",
+}
+
+
+def _player_archetype_block_html(player: dict | None) -> str:
+    profile = player or {}
+    label = profile.get("player_archetype_label")
+    if not label:
+        return (
+            '<p class="pa-pillar-group-label">Archetype</p>'
+            '<div class="pa-pillar-group pa-pillar-group-empty">'
+            '<p class="pa-placeholder-note">Indisponível</p>'
+            "</div>"
+        )
+    style = str(profile.get("player_archetype_style") or "link")
+    style_class = _ARCHETYPE_STYLE_CLASS.get(style, "pa-archetype-link")
+    icon = str(profile.get("player_archetype_icon") or "fa-user")
+    description = str(profile.get("player_archetype_description") or "")
+    return (
+        '<p class="pa-pillar-group-label">Archetype</p>'
+        '<div class="pa-pillar-group pa-archetype-panel">'
+        '<div class="pa-archetype-row">'
+        '<span class="pa-archetype-tip">'
+        f'<span class="pa-archetype-pill {style_class}">'
+        f'<i class="fa-solid {html.escape(icon)}" aria-hidden="true"></i>'
+        f"{html.escape(str(label))}"
+        "</span>"
+        f'<span class="pa-archetype-tipbox">{html.escape(description)}</span>'
+        "</span>"
+        "</div>"
+        "</div>"
+    )
+
+
+def _xp_indices_block_html(xp_profile: dict | None) -> str:
+    if not xp_profile:
+        return (
+            '<p class="pa-pillar-group-label">Índices</p>'
+            '<div class="pa-pillar-group pa-pillar-group-empty">'
+            '<p class="pa-placeholder-note">Indisponível</p>'
+            "</div>"
+        )
+    metric_ranks = _xp_stats_metric_ranks_dict(xp_profile, xstats.XP_COMPOSITE_INDEX_KEYS)
+    lines = "".join(
+        _stats_metric_line_html(xp_profile, key, metric_ranks)
+        for key in xstats.XP_COMPOSITE_INDEX_KEYS
+    )
+    return (
+        '<p class="pa-pillar-group-label">Índices</p>'
+        f'<div class="pa-pillar-group pa-indices-panel">{lines}</div>'
+    )
+
+
+def _pa_xp_section_accordion_html(
+    profile: dict,
+    section_title: str,
+    keys: tuple[str, ...],
+    *,
+    accordion_name: str = "pa-pass-xp",
+    open: bool = False,
+) -> str:
+    metric_ranks = _xp_stats_metric_ranks_dict(profile, keys)
+    lines = "".join(_stats_metric_line_html(profile, key, metric_ranks) for key in keys)
+    open_attr = " open" if open else ""
+    return (
+        f'<details class="grade-accordion" name="{html.escape(accordion_name)}"{open_attr}>'
+        "<summary>"
+        '<i class="fa-solid fa-chevron-right grade-arrow" aria-hidden="true"></i>'
+        f"{_stats_section_summary_html(section_title)}"
+        "</summary>"
+        f'<div class="grade-accordion-body">{lines}</div>'
+        "</details>"
+    )
 
 
 def _xp_rank_in_group_label(rank: int, position_group: str | None) -> str:
@@ -4753,23 +4818,28 @@ def _xp_section_grade_accordion_html(
     )
 
 
-def _build_xp_stats_card_html(xp_profile: dict | None) -> str:
+def _build_xp_stats_card_html(
+    xp_profile: dict | None,
+    player: dict | None = None,
+) -> str:
     profile = xp_profile or {}
     passing_accordions = "".join(
-        _xp_section_grade_accordion_html(
+        _pa_xp_section_accordion_html(
             profile,
-            section_key,
-            title,
+            section_title,
             keys,
-            open=False,
-            show_section_bar=True,
             accordion_name="pa-pass-xp",
+            open=False,
         )
-        for section_key, title, _subtitle, keys in XP_PASSING_SECTION_SPECS
+        for section_title, keys in xstats.XP_PLAYER_ANALYSIS_BLOCKS
     )
     passing_html = (
         '<p class="pa-pillar-group-label">Passing</p>'
         f'<div class="pa-pillar-group">{passing_accordions}</div>'
+    )
+    archetype_html = _player_archetype_block_html(player)
+    indices_html = _xp_indices_block_html(xp_profile)
+    carrying_html = (
         '<p class="pa-pillar-group-label">Carrying</p>'
         '<div class="pa-pillar-group pa-pillar-group-empty">'
         '<p class="pa-placeholder-note">Em breve</p>'
@@ -4777,7 +4847,7 @@ def _build_xp_stats_card_html(xp_profile: dict | None) -> str:
     )
     return (
         '<div class="player-card pa-pillars-card">'
-        f'<div class="pa-pillars-stack">{passing_html}</div>'
+        f'<div class="pa-pillars-stack">{passing_html}{archetype_html}{indices_html}{carrying_html}</div>'
         "</div>"
     )
 
@@ -4856,7 +4926,7 @@ def _build_player_analysis_layout_html(
         fmt_pct_fn=fmt_pct_fn,
         fmt_stat_fn=fmt_stat_fn,
     )
-    stats_card = _build_xp_stats_card_html(xp_profile)
+    stats_card = _build_xp_stats_card_html(xp_profile, player)
     return (
         f'<div class="pa-layout" style="{layout_style}">'
         f'<div class="pa-col pa-col-identity">{left_card}</div>'
