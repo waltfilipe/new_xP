@@ -16,7 +16,7 @@ from sklearn.pipeline import Pipeline
 import passes_engine as pe
 import xp_study_engine as xse
 
-XP_DATA_CACHE_VERSION = 24
+XP_DATA_CACHE_VERSION = 25
 XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total",
     "xp_m4_per_pass",
@@ -410,12 +410,18 @@ def compute_player_xp_metrics(grp: pd.DataFrame) -> dict[str, float | int]:
     scored = grp[grp["is_won"] & grp["has_end"]]
     if scored.empty or XP_COL not in scored.columns:
         return {}
+    n_passes = len(scored)
     out: dict[str, float | int] = {
         "xp_m4_total": float(scored[XP_COL].sum()),
         "xp_m4_per_pass": float(scored[XP_COL].mean()),
         "xp_m4_p90": float(scored[XP_COL].quantile(0.90)),
         "xp_m4_threat_passes": int(scored[THREAT_COL].sum()) if THREAT_COL in scored.columns else 0,
         "xp_m4_threat_rate": float(scored[THREAT_COL].mean()) if THREAT_COL in scored.columns else 0.0,
+        "pass_mean_distance": (
+            float(scored["pass_distance"].mean())
+            if n_passes and "pass_distance" in scored.columns
+            else 0.0
+        ),
     }
     for band in BANDS:
         sub = scored[scored["distance_band"] == band]

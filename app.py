@@ -5753,6 +5753,43 @@ def _scatter_pool_players(
     return rows, thresholds
 
 
+def _scatter_mean_pass_distance(row: dict) -> float:
+    mean_dist = row.get("pass_mean_distance")
+    try:
+        val = float(mean_dist)
+    except (TypeError, ValueError):
+        val = 0.0
+    if val > 0:
+        return val
+    try:
+        short = float(row.get("passes_short") or 0.0)
+        medium = float(row.get("passes_medium") or 0.0)
+        long_ = float(row.get("passes_long") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    total = short + medium + long_
+    if total <= 0:
+        return 0.0
+    return (short * 7.5 + medium * 20.0 + long_ * 32.5) / total
+
+
+def _scatter_marker_sizes(
+    mean_distances: list[float],
+    *,
+    highlight: bool = False,
+) -> list[float]:
+    if not mean_distances:
+        return []
+    dmin = min(mean_distances)
+    dmax = max(mean_distances)
+    lo = 7.0 if not highlight else 11.0
+    hi = 20.0 if not highlight else 26.0
+    span = dmax - dmin
+    if span <= 1e-9:
+        return [(lo + hi) / 2.0 for _ in mean_distances]
+    return [lo + (dist - dmin) / span * (hi - lo) for dist in mean_distances]
+
+
 def build_stats_scatter_figure(
     players: list[dict],
     *,
@@ -5785,6 +5822,7 @@ def build_stats_scatter_figure(
             "player_id": str(row.get("player_id", "")),
             "x_fmt": xstats.format_stats_value(x_key, x_val),
             "y_fmt": xstats.format_stats_value(y_key, y_val),
+            "mean_dist": _scatter_mean_pass_distance(row),
         })
 
     fig = go.Figure()
@@ -5797,11 +5835,13 @@ def build_stats_scatter_figure(
         "<b>%{text}</b><br>"
         f"{x_label}: %{{customdata[2]}}<br>"
         f"{y_label}: %{{customdata[3]}}<br>"
+        "Dist. média: %{customdata[4]:.1f} m<br>"
         "%{customdata[0]} · %{customdata[1]}"
         "<extra></extra>"
     )
 
     if regular:
+        regular_sizes = _scatter_marker_sizes([float(p["mean_dist"]) for p in regular])
         fig.add_trace(
             go.Scatter(
                 x=[p["x"] for p in regular],
@@ -5809,19 +5849,20 @@ def build_stats_scatter_figure(
                 mode="markers",
                 name="Jogadores",
                 marker=dict(
-                    size=8,
+                    size=regular_sizes,
                     color="rgba(96, 165, 250, 0.84)",
                     line=dict(width=0.8, color="#1e3a5f"),
                 ),
                 text=[p["name"] for p in regular],
                 customdata=[
-                    [p["team"], p["position"], p["x_fmt"], p["y_fmt"]] for p in regular
+                    [p["team"], p["position"], p["x_fmt"], p["y_fmt"], p["mean_dist"]] for p in regular
                 ],
                 hovertemplate=hover_template,
             )
         )
 
     if highlighted:
+        highlight_sizes = _scatter_marker_sizes([float(p["mean_dist"]) for p in highlighted], highlight=True)
         fig.add_trace(
             go.Scatter(
                 x=[p["x"] for p in highlighted],
@@ -5829,13 +5870,13 @@ def build_stats_scatter_figure(
                 mode="markers",
                 name="Selecionado",
                 marker=dict(
-                    size=13,
+                    size=highlight_sizes,
                     color="#fbbf24",
                     line=dict(width=1.4, color="#f8fafc"),
                 ),
                 text=[p["name"] for p in highlighted],
                 customdata=[
-                    [p["team"], p["position"], p["x_fmt"], p["y_fmt"]] for p in highlighted
+                    [p["team"], p["position"], p["x_fmt"], p["y_fmt"], p["mean_dist"]] for p in highlighted
                 ],
                 hovertemplate=hover_template,
             )
@@ -6024,7 +6065,11 @@ def render_scatter_section(
     )
     st.caption(
         f"{len(pool)} jogadores elegíveis · mínimo P{xstats.DISTANCE_INDEX_MIN_PASS_PERCENTILE} "
-        f"({min_passes_hint or '—'}){highlight_hint}"
+        f"({min_passes_hint or '—'}) · tamanho da bolha = distância média do passe "
+        f"(curto &lt;{xstats.DISTANCE_SHORT_MAX_M:.0f} m · "
+        f"médio {xstats.DISTANCE_SHORT_MAX_M:.0f}–{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m · "
+        f"longo &gt;{xstats.DISTANCE_MEDIUM_MAX_M:.0f} m)"
+        f"{highlight_hint}"
     )
 
 
