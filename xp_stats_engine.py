@@ -468,10 +468,10 @@ XP_PROFILE_BAR_KEYS: tuple[str, ...] = (
 )
 
 XP_PROFILE_BAR_LABELS: dict[str, str] = {
-    "xp_activity_display": "Activity",
-    "xp_edge_display": "Edge",
-    "xp_quality_display": "Quality",
-    "xp_consistency_display": "Consistency",
+    "xp_activity_display": "Volume",
+    "xp_edge_display": "Efetividade",
+    "xp_quality_display": "Qualidade",
+    "xp_consistency_display": "Consistência",
 }
 
 XP_PROFILE_BAR_METRICS: dict[str, tuple[str, ...]] = {
@@ -494,7 +494,7 @@ XP_PROFILE_BAR_METRICS: dict[str, tuple[str, ...]] = {
 XP_PROFILE_BAR_TOOLTIPS: dict[str, str] = {
     "xp_activity_display": "Mediana do rank na posição entre xP/jogo e threats/jogo.",
     "xp_edge_display": "Mediana do rank na posição entre xP/passe e xP/threat.",
-    "xp_quality_display": "Resíduo mediano por passe (xP real − esperado).",
+    "xp_quality_display": "Resíduo mediano por passe (xP real − esperado), ×100.",
     "xp_consistency_display": "Estabilidade de xP entre jogos, ajustada pelo nível médio.",
 }
 
@@ -674,7 +674,7 @@ XP_PA_TOOLTIPS: dict[str, str] = {
     "xp_m4_per_pass": "xP médio por passe — mede a eficiência de cada entrega.",
     "xp_m4_per_threat_pass": "xP médio apenas nos passes classificados como threat.",
     "xp_m4_threat_rate": "Percentual de passes que são threat no total de passes.",
-    "xp_residual_median": "Mediana do resíduo (xP real − esperado) por passe. Valores positivos indicam passes melhores que o modelo prevê.",
+    "xp_residual_median": "Mediana do resíduo (xP real − esperado) por passe, ×100. Valores positivos indicam passes melhores que o modelo prevê.",
     "xp_surprise_rate": "Percentual de passes com resíduo positivo — passes que superam a expectativa do modelo.",
     "xp_game_std_adj_score": "Estabilidade de entrega entre jogos, ajustada pelo nível médio de xP do jogador.",
     "xp_games_above_median_pct": "Percentual de jogos em que o xP do jogador ficou acima da própria mediana.",
@@ -1233,6 +1233,10 @@ def pa_stats_metric_tooltip(key: str) -> str:
     return XP_PA_TOOLTIPS.get(key, "")
 
 
+def _format_residual_display(value: float) -> str:
+    return f"{100.0 * value:+.1f}"
+
+
 def format_pa_stats_value(key: str, value: float | int | None) -> str:
     if value is None:
         return "—"
@@ -1240,7 +1244,7 @@ def format_pa_stats_value(key: str, value: float | int | None) -> str:
     if key in {"xp_m4_threat_rate", "xp_surprise_rate", "xp_games_above_median_pct"}:
         return f"{100 * val:.1f}%"
     if key.startswith("xp_residual"):
-        return f"{val:+.2f}"
+        return _format_residual_display(val)
     if key in {"xp_game_std_adj", "xp_game_std_adj_score"}:
         return f"{val:+.2f}"
     if key in {"xp_m4_per_pass", "xp_m4_per_threat_pass"}:
@@ -1275,7 +1279,7 @@ def format_stats_value(key: str, value: float | int | None) -> str:
     if key == "threat_passes_p90":
         return f"{val:.2f}"
     if key.startswith("xp_residual"):
-        return f"{val:+.4f}"
+        return _format_residual_display(val)
     if key.endswith("_p90") or key == "xp_per_90" or key == "xp_game_mean" or key == "xp_game_std":
         return f"{val:.2f}"
     if key in {"xp_game_std_adj", "xp_game_std_adj_score"}:
