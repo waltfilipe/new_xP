@@ -166,6 +166,7 @@ STATS_POSITION_BLOCKS_KEY = "stats_position_blocks"
 PA_URL_PLAYER_KEY = "_pa_url_player_id"
 PA_USER_PLAYER_PICK_KEY = "_pa_user_player_pick"
 PA_USER_POSITION_PICK_KEY = "_pa_user_position_pick"
+PA_ARCHETYPE_FILTER_KEY = "pa_archetype_filter"
 MAPS_SHORT_PASS_ONLY_KEY = "maps_short_pass_only"
 MAPS_XP_THREAT_ONLY_KEY = "maps_xp_threat_only"
 MAPS_VIEW_TYPE_KEY = "maps_view_type"
@@ -2431,6 +2432,7 @@ st.markdown(
     }
     .pa-player-slicer,
     .st-key-pa_player_slicer,
+    .st-key-pa_archetype_slicer,
     .st-key-pa_position_slicer,
     .st-key-scatter_position_slicer,
     .st-key-maps_player_slicer {
@@ -2450,6 +2452,7 @@ st.markdown(
     .st-key-pa_position_blocks [data-testid="stVerticalBlock"],
     .st-key-maps_position_blocks [data-testid="stVerticalBlock"],
     .st-key-pa_player_slicer [data-testid="stVerticalBlock"],
+    .st-key-pa_archetype_slicer [data-testid="stVerticalBlock"],
     .st-key-maps_player_slicer [data-testid="stVerticalBlock"] {
         gap: 0.35rem !important;
     }
@@ -2760,6 +2763,30 @@ st.markdown(
         color: #fde68a;
         background: rgba(202, 138, 4, 0.18);
         border-color: rgba(250, 204, 21, 0.5);
+    }
+    .pa-archetype-impacto {
+        color: #fdba74;
+        background: rgba(234, 88, 12, 0.16);
+        border-color: rgba(251, 146, 60, 0.45);
+    }
+    .pa-xp-profile-archetype-title {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-shrink: 0;
+        margin: 0 0 0.35rem;
+        padding-top: 0.05rem;
+    }
+    .pa-xp-profile-archetype-title .pa-archetype-pill {
+        font-size: 0.8rem;
+        padding: 0.34rem 0.78rem;
+    }
+    .pa-xp-profile-archetype-title .pa-archetype-tipbox {
+        left: 50%;
+        transform: translateX(-50%);
+        min-width: 14rem;
+        max-width: 18rem;
+        text-align: left;
     }
     .pa-xp-profile-archetype {
         display: flex;
@@ -4004,6 +4031,7 @@ def _player_analysis_options(
     xp_by_id: dict[str, dict] | None = None,
     exclude_player_id: str | None = None,
     sort_by: str = "xp_pass_rating",
+    archetype_filter: str | None = None,
 ) -> list[tuple[str, str, str, str]]:
     """Player slicer options ranked within selected position blocks."""
     ranked_rows: list[tuple[str, str, str, float]] = []
@@ -4019,6 +4047,10 @@ def _player_analysis_options(
         ):
             continue
         xp_profile = (xp_by_id or {}).get(pid, {})
+        if archetype_filter:
+            player_archetype = str(xp_profile.get("xp_profile_archetype") or "")
+            if player_archetype != str(archetype_filter):
+                continue
         if sort_by == "dist_index_mean":
             sort_val = xp_profile.get("xp_dist_index_mean")
             sort_key = float(sort_val) if sort_val is not None else float("-inf")
@@ -4050,6 +4082,16 @@ def _player_analysis_options(
     return options
 
 
+def _xp_profile_archetype_filter_options() -> list[tuple[str, str]]:
+    return [
+        (xstats.XP_PROFILE_ARCHETYPE_FILTER_ALL, "Todos os arquétipos"),
+        *(
+            (key, xstats.XP_PROFILE_ARCHETYPE_LABELS[key])
+            for key in xstats.XP_PROFILE_ARCHETYPE_KEYS
+        ),
+    ]
+
+
 def _render_shared_player_slicers(
     all_players: list[dict],
     progression_by_id: dict[str, dict],
@@ -4063,17 +4105,42 @@ def _render_shared_player_slicers(
     """Position block slicer + player selectbox. Returns selected player_id or None."""
     blocks_state_key = state_key or _position_blocks_state_key(key_prefix)
     map_id_key = _player_map_id_key(key_prefix)
+    use_archetype_slicer = key_prefix == "pa" and xp_by_id is not None
+    archetype_filter: str | None = None
     with st.container():
         st.markdown('<div class="pa-slicer-panel">', unsafe_allow_html=True)
-        pos_col, player_col = st.columns([1, 1], gap="medium")
+        if use_archetype_slicer:
+            pos_col, archetype_col, player_col = st.columns([1.05, 0.9, 1.2], gap="medium")
+        else:
+            pos_col, player_col = st.columns([1, 1], gap="medium")
+            archetype_col = None
         with pos_col:
             with st.container(key=f"{key_prefix}_position_slicer"):
                 position_codes, position_groups = _render_position_block_slicer(
                     key_prefix=key_prefix,
                     state_key=blocks_state_key,
                 )
+        if archetype_col is not None:
+            with archetype_col:
+                with st.container(key="pa_archetype_slicer"):
+                    filter_options = _xp_profile_archetype_filter_options()
+                    filter_keys = [option[0] for option in filter_options]
+                    filter_labels = {key: label for key, label in filter_options}
+                    selected_archetype = st.selectbox(
+                        "Arquétipo",
+                        options=filter_keys,
+                        format_func=lambda key: filter_labels.get(key, key),
+                        key=PA_ARCHETYPE_FILTER_KEY,
+                    )
         selected_label = None
+        id_by_label: dict[str, str] = {}
         with player_col:
+            if use_archetype_slicer:
+                selected_arch = st.session_state.get(
+                    PA_ARCHETYPE_FILTER_KEY,
+                    xstats.XP_PROFILE_ARCHETYPE_FILTER_ALL,
+                )
+                archetype_filter = selected_arch or None
             with st.container(key=f"{key_prefix}_player_slicer"):
                 if not position_codes and not position_groups:
                     st.info("Selecione uma posição para filtrar jogadores.")
@@ -4086,6 +4153,7 @@ def _render_shared_player_slicers(
                     position_groups=position_groups,
                     xp_by_id=xp_by_id,
                     sort_by=sort_by,
+                    archetype_filter=archetype_filter,
                 )
                 if not options:
                     st.info("Nenhum jogador disponível para os filtros selecionados.")
@@ -5275,6 +5343,7 @@ _ARCHETYPE_STYLE_CLASS: dict[str, str] = {
     "link": "pa-archetype-link",
     "reference": "pa-archetype-reference",
     "elite": "pa-archetype-elite",
+    "impacto": "pa-archetype-impacto",
 }
 
 
@@ -5479,7 +5548,7 @@ def _xp_profile_bars_html(xp_profile: dict | None) -> str:
     return f'<div class="pa-xp-profile-bars">{rows}</div>'
 
 
-def _xp_profile_archetype_html(xp_profile: dict | None) -> str:
+def _xp_profile_archetype_html(xp_profile: dict | None, *, as_title: bool = False) -> str:
     if not xp_profile:
         return ""
     archetype = xp_profile.get("xp_profile_archetype")
@@ -5496,8 +5565,11 @@ def _xp_profile_archetype_html(xp_profile: dict | None) -> str:
     style = xstats.XP_PROFILE_ARCHETYPE_STYLES.get(str(archetype), "link")
     style_class = _ARCHETYPE_STYLE_CLASS.get(style, "pa-archetype-link")
     icon = xstats.XP_PROFILE_ARCHETYPE_ICONS.get(str(archetype), "fa-chart-pie")
+    wrapper_class = (
+        "pa-xp-profile-archetype-title" if as_title else "pa-xp-profile-archetype"
+    )
     return (
-        '<div class="pa-xp-profile-archetype">'
+        f'<div class="{wrapper_class}">'
         '<span class="pa-archetype-tip">'
         f'<span class="pa-archetype-pill {style_class}">'
         f'<i class="fa-solid {html.escape(icon)}" aria-hidden="true"></i>'
@@ -5513,12 +5585,12 @@ def _xp_profile_score_column_html(xp_profile: dict | None) -> str:
     if not xp_profile:
         return ""
     bars_html = _xp_profile_bars_html(xp_profile)
-    archetype_html = _xp_profile_archetype_html(xp_profile)
+    archetype_html = _xp_profile_archetype_html(xp_profile, as_title=True)
+    title_html = archetype_html or '<p class="pa-xp-profile-title">xP Profile</p>'
     return (
         '<div class="player-card pa-xp-profile-card">'
-        '<p class="pa-xp-profile-title">xP Profile</p>'
+        f"{title_html}"
         f"{bars_html}"
-        f"{archetype_html}"
         "</div>"
     )
 

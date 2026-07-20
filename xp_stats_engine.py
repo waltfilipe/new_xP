@@ -500,58 +500,67 @@ XP_PROFILE_BAR_TOOLTIPS: dict[str, str] = {
 
 XP_PROFILE_ARCHETYPE_KEYS: tuple[str, ...] = (
     "elite",
-    "seguranca",
     "criativo",
-    "regular",
+    "seguranca",
+    "impacto",
     "limitado",
+    "regular",
 )
 
 XP_PROFILE_ARCHETYPE_LABELS: dict[str, str] = {
     "elite": "Elite",
-    "seguranca": "Segurança",
     "criativo": "Criativo",
-    "regular": "Regular",
+    "seguranca": "Segurança",
+    "impacto": "Impacto",
     "limitado": "Limitado",
+    "regular": "Regular",
 }
 
 XP_PROFILE_ARCHETYPE_DESCRIPTIONS: dict[str, str] = {
     "elite": (
-        "Perfil completo com motor de elite: volume e efetividade acima da mediana na posição, "
-        "com qualidade ou consistência também acima da mediana."
+        "Perfil completo: volume, efetividade, qualidade e consistência acima da mediana "
+        "na posição."
+    ),
+    "criativo": (
+        "Especialista seletivo: efetividade e qualidade acima da mediana, com volume e "
+        "consistência abaixo."
     ),
     "seguranca": (
         "Perfil de segurança: volume e consistência acima da mediana — confiável, discreto "
-        "e preciso/estável no passe."
+        "e estável no passe."
     ),
-    "criativo": (
-        "Perfil criativo: efetividade acima da mediana com qualidade elevada ou consistência "
-        "mais volátil (especialista técnico / gambler)."
-    ),
-    "regular": (
-        "Perfil equilibrado na posição, sem destaque claro em volume, efetividade, qualidade "
-        "ou consistência."
+    "impacto": (
+        "Produtor de alto impacto: volume, efetividade e qualidade acima da mediana, com "
+        "consistência mais volátil."
     ),
     "limitado": (
-        "Baixo impacto relativo na posição: três ou quatro eixos do xP Profile abaixo da "
+        "Baixo impacto relativo na posição: três ou mais eixos do xP Profile abaixo da "
         "mediana do grupo."
+    ),
+    "regular": (
+        "Perfil equilibrado na posição, sem encaixar claramente nos demais arquétipos."
     ),
 }
 
 XP_PROFILE_ARCHETYPE_STYLES: dict[str, str] = {
     "elite": "elite",
-    "seguranca": "build",
     "criativo": "attack",
-    "regular": "link",
+    "seguranca": "build",
+    "impacto": "impacto",
     "limitado": "reference",
+    "regular": "link",
 }
 
 XP_PROFILE_ARCHETYPE_ICONS: dict[str, str] = {
     "elite": "fa-crown",
-    "seguranca": "fa-shield-halved",
     "criativo": "fa-wand-magic-sparkles",
-    "regular": "fa-equals",
+    "seguranca": "fa-shield-halved",
+    "impacto": "fa-bolt",
     "limitado": "fa-arrow-trend-down",
+    "regular": "fa-equals",
 }
+
+XP_PROFILE_ARCHETYPE_FILTER_ALL = ""
 
 ACTIVITY_METRICS: tuple[str, ...] = (
     "xp_per_90",
@@ -995,7 +1004,7 @@ def classify_xp_profile_archetype(
     row: dict,
     medians: dict[str, float],
 ) -> str:
-    """Classify a player into one of five xP profile archetypes (within position)."""
+    """Classify a player into one of six xP profile archetypes (within position)."""
     scores: dict[str, float] = {}
     for key in XP_PROFILE_BAR_KEYS:
         raw = row.get(key)
@@ -1011,12 +1020,14 @@ def classify_xp_profile_archetype(
     quality = "xp_quality_display"
     consistency = "xp_consistency_display"
 
-    if above[volume] and above[effectiveness] and (above[quality] or above[consistency]):
+    if above[volume] and above[effectiveness] and above[quality] and above[consistency]:
         return "elite"
+    if above[effectiveness] and above[quality] and below[consistency] and below[volume]:
+        return "criativo"
     if above[volume] and above[consistency]:
         return "seguranca"
-    if above[effectiveness] and (above[quality] or below[consistency]):
-        return "criativo"
+    if above[volume] and above[effectiveness] and above[quality]:
+        return "impacto"
     if sum(below.values()) >= 3:
         return "limitado"
     return "regular"
