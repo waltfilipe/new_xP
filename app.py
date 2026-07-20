@@ -140,12 +140,7 @@ from progression_maps import (
 xpe = _load_xp_study_engine()
 xe = _load_xp_engine()
 xstats = _load_xp_stats_engine()
-from xp_study_maps import (
-    build_special_passes_season_map_figure,
-    draw_special_passes_season_map,
-    draw_top_xp_passes_map,
-    draw_xp_destination_surface,
-)
+from xp_study_maps import draw_special_passes_season_map, draw_top_xp_passes_map, draw_xp_destination_surface
 
 XP_DATA_CACHE_VERSION = xe.XP_DATA_CACHE_VERSION
 
@@ -170,6 +165,7 @@ PLAYER_ANALYSIS_POSITION_BLOCKS_KEY = "pa_position_blocks"
 MAPS_SHORT_PASS_ONLY_KEY = "maps_short_pass_only"
 MAPS_XP_THREAT_ONLY_KEY = "maps_xp_threat_only"
 MAPS_SPECIAL_PASS_KEY = "maps_special_pass_filter"
+MAPS_PASS_SELECT_KEY = "maps_pass_select"
 SCATTER_X_METRIC_KEY = "scatter_x_metric"
 SCATTER_Y_METRIC_KEY = "scatter_y_metric"
 SCATTER_POSITION_BLOCKS_KEY = "scatter_position_blocks"
@@ -2412,7 +2408,7 @@ st.markdown(
     .pa-compare-legend-primary::before { background: #a78bfa; }
     .pa-compare-legend-secondary::before { background: #86efac; }
     .pa-maps-compact {
-        max-width: 980px;
+        max-width: 1080px;
         margin: 0 auto;
     }
     .pa-maps-compact [data-testid="stVerticalBlock"] > div {
@@ -2423,17 +2419,19 @@ st.markdown(
         max-width: 420px;
         margin: 0 0 0.65rem 0;
     }
-    .pa-maps-grid-row [data-testid="stImage"] img,
-    .pa-maps-compact [data-testid="stPyplot"] {
+    .pa-maps-grid-row [data-testid="stImage"] img {
         max-height: 220px;
         object-fit: contain;
     }
-    .pa-maps-compact [data-testid="stPlotlyChart"] {
+    .pa-maps-compact [data-testid="stPyplot"] {
         width: 100%;
-        min-height: 640px;
     }
-    .pa-maps-compact [data-testid="stPlotlyChart"] > div {
-        height: 100% !important;
+    .pa-maps-detail-panel {
+        background: #111827;
+        border: 1px solid #334155;
+        border-radius: 10px;
+        padding: 0.85rem 1rem;
+        margin-top: 0.15rem;
     }
     .pa-stats-filter {
         display: grid;
@@ -5654,6 +5652,30 @@ def _filter_special_passes_for_map(passes_df, special_pass_key: str):
     return xstats.filter_passes_by_special_type(passes_df, special_pass_key)
 
 
+def _maps_passes_table(pass_df) -> "pd.DataFrame":
+    import pandas as pd
+
+    work = pass_df.copy()
+    if "xp_m4" in work.columns:
+        work = work.sort_values("xp_m4", ascending=False)
+    work = work.reset_index(drop=True)
+    if "xp_residual" not in work.columns and {"xp_m4", "xp_expected"}.issubset(work.columns):
+        work["xp_residual"] = work["xp_m4"].astype(float) - work["xp_expected"].astype(float)
+    return work
+
+
+def _maps_pass_option_label(row, index: int) -> str:
+    xp = float(row.get("xp_m4") or 0.0)
+    residual = float(row.get("xp_residual") or 0.0)
+    dist = float(row.get("pass_distance") or 0.0)
+    match = str(row.get("match_date") or "—")
+    return f"#{index + 1} · xP {xp:.3f} · Δ {residual:+.3f} · {dist:.0f} m · {match}"
+
+
+def _maps_pass_select_key(player_id: str, special_pass_key: str) -> str:
+    return f"{MAPS_PASS_SELECT_KEY}_{player_id}_{special_pass_key}"
+
+
 def _xp_stats_metric_ranks_dict(profile: dict, keys: tuple[str, ...]) -> dict:
     ranks: dict[str, dict[str, int]] = {}
     for key in keys:
@@ -6172,18 +6194,50 @@ def render_maps_section(
     if passes_df is None or passes_df.empty:
         st.info("Nenhum passe completo para este jogador com o filtro selecionado.")
     else:
-        fig = build_special_passes_season_map_figure(
-            passes_df,
-            player_name=str(player.get("player_name", "—")),
-            season_label=APP_LEAGUE,
-            category_label=xstats.special_pass_map_label(special_pass_key),
+        work = _maps_passes_table(passes_df)
+        labels = [_maps_pass_option_label(work.iloc[i], i) for i in range(len(work))]
+        select_key = _maps_pass_select_key(str(player_id), special_pass_key)
+
+        map_col, panel_col = st.columns([1.7, 1], gap="medium")
+        with panel_col:
+            st.markdown('<div class="pa-maps-detail-panel">', unsafe_allow_html=True)
+            st.markdown("#### Detalhe do passe")
+            selected_label = st.selectbox(
+                "Passe",
+                options=labels,
+                key=select_key,
+            )
+            selected_idx = labels.index(selected_label)
+            row = work.iloc[selected_idx]
+            xp_val = float(row.get("xp_m4") or 0.0)
+            expected_val = float(row.get("xp_expected") or 0.0)
+            residual_val = float(row.get("xp_residual") or (xp_val - expected_val))
+            m1, m2 = st.columns(2)
+            m1.metric("xP", f"{xp_val:.3f}")
+            m2.metric("vs esperado", f"{residual_val:+.3f}")
+            st.caption(f"xP esperado: **{expected_val:.3f}**")
+            st.caption(
+                f"Distância: **{float(row.get('pass_distance') or 0.0):.1f} m** · "
+                f"Jogo: **{html.escape(str(row.get('match_date') or '—'))}**"
+            )
+            st.caption("Números no mapa correspondem à lista acima (ordenada por xP).")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with map_col:
+            fig = draw_special_passes_season_map(
+                work,
+                player_name=str(player.get("player_name", "—")),
+                season_label=APP_LEAGUE,
+                category_label=xstats.special_pass_map_label(special_pass_key),
+                xp_col="xp_m4",
+                highlight_index=selected_idx,
+            )
+            st.pyplot(fig, clear_figure=True, use_container_width=True)
+
+        st.caption(
+            f"{len(work)} passes completos · círculo = origem · quadrado = destino · "
+            "dourado = passe selecionado"
         )
-        st.plotly_chart(
-            fig,
-            use_container_width=True,
-            config={"displayModeBar": False, "responsive": True},
-        )
-        st.caption(f"{len(passes_df)} passes completos · círculo = origem (hover: xP e vs esperado) · quadrado = destino")
     st.markdown("</div>", unsafe_allow_html=True)
 
 
