@@ -160,6 +160,15 @@ SPECIAL_PASS_MAP_FILTERS: tuple[tuple[str, str], ...] = (
 )
 SPECIAL_PASS_MAP_FILTER_KEYS: tuple[str, ...] = tuple(key for key, _label in SPECIAL_PASS_MAP_FILTERS)
 SPECIAL_PASS_MAP_FILTER_LABELS: dict[str, str] = dict(SPECIAL_PASS_MAP_FILTERS)
+SPECIAL_PASS_COUNT_KEYS: tuple[str, ...] = SPECIAL_PASS_MAP_FILTER_KEYS
+
+
+def special_pass_count_key(filter_key: str) -> str:
+    return f"special_{filter_key}"
+
+
+def special_pass_per_game_key(filter_key: str) -> str:
+    return f"special_{filter_key}_p90"
 
 
 def _completed_pass_frame(passes: pd.DataFrame) -> pd.DataFrame:
@@ -268,6 +277,8 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
     masks = compute_special_pass_masks(scored)
 
     out: dict[str, float | int] = dict(base)
+    for sp_key in SPECIAL_PASS_COUNT_KEYS:
+        out[special_pass_count_key(sp_key)] = int(masks[sp_key].sum())
     out.update({
         "xp_diagonal_long_total": _sum_xp(masks["diagonal_long"], xp),
         "xp_line_break_total": _sum_xp(masks["line_break"], xp),
@@ -321,6 +332,8 @@ def apply_per90_metrics(metrics: dict[str, float | int], minutes: float | None) 
     """Add per-90 variants in place."""
     if not minutes or float(minutes) <= 0:
         metrics["xp_per_90"] = 0.0
+        for sp_key in SPECIAL_PASS_COUNT_KEYS:
+            metrics[special_pass_per_game_key(sp_key)] = 0.0
         return
     mins_f = float(minutes)
     factor = 90.0 / mins_f
@@ -330,6 +343,9 @@ def apply_per90_metrics(metrics: dict[str, float | int], minutes: float | None) 
     for band in BANDS:
         band_threats = int(metrics.get(f"xp_m4_threat_{band}", 0))
         metrics[f"xp_m4_threat_{band}_p90"] = float(band_threats) * factor
+    for sp_key in SPECIAL_PASS_COUNT_KEYS:
+        count = int(metrics.get(special_pass_count_key(sp_key), 0))
+        metrics[special_pass_per_game_key(sp_key)] = float(count) * factor
 
 
 # (section_title, metric_keys)
@@ -347,13 +363,13 @@ XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "xp_m4_per_pass_long", "xp_m4_threat_rate_long",
     )),
     ("SPECIAL PASSES", (
-        "xp_diagonal_long_total",
-        "xp_line_break_total",
-        "xp_inversion_total",
-        "xp_cross_total",
-        "xp_final_third_share",
-        "xp_box_share",
-        "xp_from_deep",
+        "xp_diagonal_long_total", "special_diagonal_long_p90",
+        "xp_line_break_total", "special_line_break_p90",
+        "xp_inversion_total", "special_inversion_p90",
+        "xp_cross_total", "special_cross_p90",
+        "xp_final_third_share", "special_final_third_p90",
+        "xp_box_share", "special_in_box_p90",
+        "xp_from_deep", "special_from_deep_p90",
     )),
     ("Qualidade e threat", (
         "xp_residual_positive", "xp_residual_negative", "xp_surprise_rate",
@@ -417,13 +433,20 @@ XP_STATS_LABELS: dict[str, str] = {
     "xp_m4_threat_medium_p90": "Threat p/game (Medium)",
     "xp_m4_total_long": "xP Total (Long)",
     "xp_m4_threat_long_p90": "Threat p/game (Long)",
-    "xp_diagonal_long_total": "Diagonal Longa",
-    "xp_line_break_total": "Quebra linha",
-    "xp_inversion_total": "Inversões",
-    "xp_cross_total": "Cruzamento",
+    "xp_diagonal_long_total": "Diagonal Longa (xP)",
+    "special_diagonal_long_p90": "Diagonal Longa (Per game)",
+    "xp_line_break_total": "Quebra linha (xP)",
+    "special_line_break_p90": "Quebra linha (Per game)",
+    "xp_inversion_total": "Inversões (xP)",
+    "special_inversion_p90": "Inversões (Per game)",
+    "xp_cross_total": "Cruzamento (xP)",
+    "special_cross_p90": "Cruzamento (Per game)",
     "xp_final_third_share": "% xP no terço final",
+    "special_final_third_p90": "Terço final (Per game)",
     "xp_box_share": "% xP na área",
+    "special_in_box_p90": "Na área (Per game)",
     "xp_from_deep": "xP from deep",
+    "special_from_deep_p90": "From deep (Per game)",
     "xp_residual_positive": "xP acima do esperado",
     "xp_residual_negative": "xP abaixo do esperado",
     "xp_surprise_rate": "Surprise rate",
