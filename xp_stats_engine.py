@@ -75,8 +75,25 @@ def _is_right_corridor(y: np.ndarray) -> np.ndarray:
     return y > CENTRAL_Y_MAX
 
 
+def _is_central_corridor(y: np.ndarray) -> np.ndarray:
+    return (y >= CENTRAL_Y_MIN) & (y <= CENTRAL_Y_MAX)
+
+
 def _is_lateral_corridor(y: np.ndarray) -> np.ndarray:
     return _is_left_corridor(y) | _is_right_corridor(y)
+
+
+def _is_diagonal_long_pass(y_start: np.ndarray, y_end: np.ndarray) -> np.ndarray:
+    """Swap laterally: left/central -> right, or right/central -> left."""
+    to_right = (
+        (_is_left_corridor(y_start) | _is_central_corridor(y_start))
+        & _is_right_corridor(y_end)
+    )
+    to_left = (
+        (_is_right_corridor(y_start) | _is_central_corridor(y_start))
+        & _is_left_corridor(y_end)
+    )
+    return to_right | to_left
 
 
 def _line_break_origin_corridor(y: np.ndarray) -> np.ndarray:
@@ -151,16 +168,10 @@ def compute_special_pass_masks(scored: pd.DataFrame) -> dict[str, np.ndarray]:
     start_zone = _zone_x(x_start)
     long_pass = _is_long_pass(scored, dist)
     lateral_start = _is_lateral_corridor(y_start)
-    lateral_end = _is_lateral_corridor(y_end)
     in_box = _in_penalty_box(x_end, y_end)
 
     return {
-        "diagonal_long": (
-            (x_start <= DEF_X_MAX)
-            & lateral_end
-            & (x_end >= FINAL_X_MIN)
-            & long_pass
-        ),
+        "diagonal_long": long_pass & _is_diagonal_long_pass(y_start, y_end),
         "line_break": (
             _line_break_origin_corridor(y_start)
             & (x_start > LINE_BREAK_MIN_START_X)

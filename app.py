@@ -6050,20 +6050,14 @@ def render_maps_section(
     if passes_df is None or passes_df.empty:
         st.info("Nenhum passe completo para este jogador com o filtro selecionado.")
     else:
-        threat_count = int(passes_df[xe.THREAT_COL].sum()) if xe.THREAT_COL in passes_df.columns else 0
         fig = draw_special_passes_season_map(
             passes_df,
             player_name=str(player.get("player_name", "—")),
             season_label=APP_LEAGUE,
             category_label=xstats.special_pass_map_label(special_pass_key),
-            xp_col=xe.XP_COL,
-            threat_col=xe.THREAT_COL,
         )
         st.pyplot(fig, clear_figure=True, use_container_width=True)
-        st.caption(
-            f"{len(passes_df)} passes exibidos"
-            + (f" · {threat_count} threat passes" if threat_count else "")
-        )
+        st.caption(f"{len(passes_df)} passes completos exibidos")
     st.markdown("</div>", unsafe_allow_html=True)
 
 

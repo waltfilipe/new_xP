@@ -182,8 +182,8 @@ def draw_special_passes_season_map(
     player_name: str,
     season_label: str = "temporada",
     category_label: str = "Special pass",
-    xp_col: str | None = "xp_m4",
-    threat_col: str = "is_threat_m4",
+    xp_col: str | None = None,
+    threat_col: str | None = None,
 ):
     """Season map of passes for one special-pass category."""
     fig, ax, pitch = _base_pitch()
@@ -216,14 +216,10 @@ def draw_special_passes_season_map(
         else:
             color = "#60a5fa"
             lw_scale = 1.0
-        is_threat = bool(getattr(row, threat_col, False)) if threat_col in work.columns else False
-        alpha = 0.98 if is_threat else 0.78
-        if is_threat:
-            lw_scale += 0.15
         _delicate_arrows(
             pitch, ax,
             row.x_start, row.y_start, row.x_end, row.y_end,
-            color, alpha=alpha, lw_scale=lw_scale,
+            color, alpha=0.9, lw_scale=lw_scale,
         )
         pitch.scatter(
             row.x_start, row.y_start,
@@ -243,7 +239,6 @@ def draw_special_passes_season_map(
 
     legend_handles = [
         Line2D([0], [0], color=CMAP_XP(0.9) if color_by_xp else "#60a5fa", lw=2.0, label="Passe"),
-        Line2D([0], [0], color=CMAP_XP(0.95) if color_by_xp else "#fbbf24", lw=2.8, label="Threat pass"),
         Line2D([0], [0], marker="o", color="w", markerfacecolor="#94a3b8", markersize=5, linestyle="None", label="Origem"),
         Line2D([0], [0], marker="s", color="w", markerfacecolor="#94a3b8", markersize=5, linestyle="None", label="Destino"),
     ]
