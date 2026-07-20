@@ -3359,6 +3359,27 @@ st.markdown(
         font-size: 0.78rem;
         font-style: italic;
     }
+    .pa-xp-section-panel {
+        margin-bottom: 0.55rem;
+        padding-bottom: 0.45rem;
+        border-bottom: 1px solid rgba(36, 48, 73, 0.85);
+    }
+    .pa-xp-section-panel:last-child {
+        margin-bottom: 0;
+        padding-bottom: 0;
+        border-bottom: none;
+    }
+    .pa-xp-section-title {
+        color: #cbd5e1;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        margin-bottom: 0.35rem;
+    }
+    .pa-xp-section-body .metric-line:last-child {
+        border-bottom: none;
+    }
     .pa-pillars-stack .grade-accordion {
         margin-bottom: 0;
     }
@@ -4653,6 +4674,30 @@ def _xp_pass_grade_pct(display_score: float) -> float:
     return max(0.0, min(100.0, (display_score - 4.5) / 3.0 * 100.0))
 
 
+def _pass_grade_gradient_color(pct: float) -> str:
+    """Sample the pass-grade bar gradient at a horizontal position."""
+    stops: tuple[tuple[float, tuple[int, int, int]], ...] = (
+        (0.0, (0x7F, 0x1D, 0x1D)),
+        (24.0, (0xB4, 0x53, 0x09)),
+        (42.0, (0xCA, 0x8A, 0x04)),
+        (68.0, (0x65, 0xA3, 0x0D)),
+        (100.0, (0x16, 0xA3, 0x4A)),
+    )
+    position = max(0.0, min(100.0, float(pct)))
+    for index in range(len(stops) - 1):
+        start_pct, start_rgb = stops[index]
+        end_pct, end_rgb = stops[index + 1]
+        if position <= end_pct:
+            span = end_pct - start_pct
+            t = 0.0 if span <= 0 else (position - start_pct) / span
+            rgb = tuple(
+                int(start_rgb[channel] + (end_rgb[channel] - start_rgb[channel]) * t)
+                for channel in range(3)
+            )
+            return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+    return "#16a34a"
+
+
 def _player_analysis_pass_grade_panel_html(
     player: dict,
     xp_profile: dict | None,
@@ -4671,25 +4716,13 @@ def _player_analysis_pass_grade_panel_html(
     pct = _xp_pass_grade_pct(display_score)
     tier = _xp_gradient_bar_tier(pct)
     score_txt = html.escape(fmt_rating_score(rating_val))
-    rank = xp_profile.get("xp_pass_rating_rank_in_group")
-    total = xp_profile.get("xp_pass_rating_rank_pool_in_group")
-    rank_txt = (
-        f"#{int(rank)} de {int(total)} na posição"
-        if rank and total
-        else ""
-    )
     low_cls = (
         " pa-pass-grade-low-sample"
         if _is_low_sample_rating(merged, rating_key="xp_pass_rating")
         else ""
     )
-    chip_bg = rating_value_color(display_score)
+    chip_bg = _pass_grade_gradient_color(pct)
     chip_txt = _badge_text_color(chip_bg)
-    meta_html = (
-        f'<p class="pa-pass-grade-meta">{html.escape(rank_txt)}</p>'
-        if rank_txt
-        else ""
-    )
     return (
         '<div class="player-card pa-pass-grade-card">'
         '<p class="pa-pass-grade-title">Overall Pass Grade</p>'
@@ -4701,7 +4734,6 @@ def _player_analysis_pass_grade_panel_html(
         f'<span class="pa-pass-grade-chip{low_cls}" '
         f'style="background:{chip_bg};color:{chip_txt}">{score_txt}</span>'
         "</div>"
-        f"{meta_html}"
         "</div>"
         "</div>"
     )
@@ -5331,6 +5363,21 @@ def _player_analysis_score_stack_html(
     )
 
 
+def _pa_xp_section_panel_html(
+    profile: dict,
+    section_title: str,
+    keys: tuple[str, ...],
+) -> str:
+    metric_ranks = _xp_stats_metric_ranks_dict(profile, keys)
+    lines = "".join(_stats_metric_line_html(profile, key, metric_ranks) for key in keys)
+    return (
+        '<div class="pa-xp-section-panel">'
+        f'<div class="pa-xp-section-title">{html.escape(section_title)}</div>'
+        f'<div class="pa-xp-section-body">{lines}</div>'
+        "</div>"
+    )
+
+
 def _pa_xp_section_accordion_html(
     profile: dict,
     section_title: str,
@@ -5463,29 +5510,17 @@ def _build_xp_stats_card_html(
     player: dict | None = None,
 ) -> str:
     profile = xp_profile or {}
-    passing_accordions = "".join(
-        _pa_xp_section_accordion_html(
-            profile,
-            section_title,
-            keys,
-            accordion_name="pa-pass-xp",
-            open=False,
-        )
+    passing_sections = "".join(
+        _pa_xp_section_panel_html(profile, section_title, keys)
         for section_title, keys in xstats.XP_PLAYER_ANALYSIS_BLOCKS
     )
     passing_html = (
         '<p class="pa-pillar-group-label">Passing</p>'
-        f'<div class="pa-pillar-group">{passing_accordions}</div>'
-    )
-    carrying_html = (
-        '<p class="pa-pillar-group-label">Carrying</p>'
-        '<div class="pa-pillar-group pa-pillar-group-empty">'
-        '<p class="pa-placeholder-note">Em breve</p>'
-        "</div>"
+        f'<div class="pa-pillar-group">{passing_sections}</div>'
     )
     return (
         '<div class="player-card pa-pillars-card">'
-        f'<div class="pa-pillars-stack">{passing_html}{carrying_html}</div>'
+        f'<div class="pa-pillars-stack">{passing_html}</div>'
         "</div>"
     )
 

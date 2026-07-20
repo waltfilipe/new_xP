@@ -427,10 +427,13 @@ XP_PLAYER_ANALYSIS_BLOCKS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "xp_m4_per_threat_pass",
         "xp_m4_threat_rate",
     )),
-    ("Criação", (
-        "xp_final_third_share", "threat_final_third_p90",
-        "xp_box_share", "threat_in_box_p90",
-        "xp_from_deep", "threat_from_deep_p90",
+    ("Quality", (
+        "xp_residual_median",
+        "xp_surprise_rate",
+    )),
+    ("Consistency", (
+        "xp_game_std_adj_score",
+        "xp_games_above_median_pct",
     )),
 )
 
