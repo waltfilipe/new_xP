@@ -176,14 +176,12 @@ SCATTER_POSITION_BLOCKS_KEY = "scatter_position_blocks"
 SCATTER_HIGHLIGHT_PLAYER_KEY = "scatter_highlight_player"
 ESTUDO_PLAYER_SELECT_KEY = "estudo_player_select"
 PLAYER_ANALYSIS_POSITION_BLOCKS: tuple[tuple[str, str, frozenset[str] | None, str | None], ...] = (
-    ("cb", "Zagueiros", frozenset({"CB", "RCB", "LCB"}), None),
-    ("rb", "Laterais Direitos", frozenset({"RB", "RWB"}), None),
-    ("lb", "Laterais Esquerdos", frozenset({"LB", "LWB"}), None),
+    ("cb", "Zagueiros", frozenset({"CB", "RCB", "LCB"}), "centerbacks"),
+    ("fb", "Laterais", frozenset({"RB", "LB", "RWB", "LWB"}), "fullbacks"),
     ("cm", "Meio-campistas", None, "central_midfielders"),
     ("am", "Meias avançados", None, "attacking_midfielders"),
-    ("rw", "Extremos Direitos", frozenset({"RW", "RM", "RCF"}), None),
-    ("lw", "Extremos Esquerdos", frozenset({"LW", "LM", "LCF"}), None),
-    ("st", "Atacantes", frozenset({"ST", "CF", "SS"}), None),
+    ("wg", "Extremos", frozenset({"RW", "LW", "RM", "LM", "RCF", "LCF"}), "wingers"),
+    ("st", "Atacantes", frozenset({"ST", "CF", "SS"}), "strikers"),
 )
 SCATTER_POSITION_BLOCKS: tuple[tuple[str, str, frozenset[str] | None, str | None], ...] = (
     ("cb", "Zagueiros", frozenset({"CB", "RCB", "LCB"}), "centerbacks"),
@@ -203,11 +201,17 @@ SCATTER_POSITION_BLOCK_BY_ID: dict[str, tuple[str, frozenset[str] | None, str | 
 }
 _RATING_GROUP_BLOCK_IDS: dict[str, frozenset[str]] = {
     "centerbacks": frozenset({"cb"}),
-    "fullbacks": frozenset({"rb", "lb"}),
+    "fullbacks": frozenset({"fb"}),
     "central_midfielders": frozenset({"cm"}),
     "attacking_midfielders": frozenset({"am"}),
-    "wingers": frozenset({"lw", "rw"}),
+    "wingers": frozenset({"wg"}),
     "strikers": frozenset({"st"}),
+}
+_LEGACY_POSITION_BLOCK_IDS: dict[str, str] = {
+    "rb": "fb",
+    "lb": "fb",
+    "rw": "wg",
+    "lw": "wg",
 }
 FIXED_CLASSIFICATION_MODEL = CLASSIFICATION_MODEL_DEFAULT
 FIXED_TIER_MODEL = TIER_MODEL_DEFAULT
@@ -1182,6 +1186,7 @@ def _render_xp_comparison_panel(
         position_groups=comparison_groups,
         xp_by_id=xp_by_id,
         exclude_player_id=primary_id,
+        sort_by="xp_pass_rating",
     )
     if not options:
         st.info(f"Nenhum outro jogador disponível no grupo {pool_label} para comparação.")
@@ -1243,6 +1248,7 @@ def _render_player_comparison_panel(
         position_groups=comparison_groups,
         xp_by_id=xp_by_id,
         exclude_player_id=primary_id,
+        sort_by="xp_pass_rating",
     )
     if not options:
         st.info(f"Nenhum outro jogador disponível no grupo {pool_label} para comparação.")
@@ -2420,6 +2426,8 @@ st.markdown(
     }
     .pa-player-slicer,
     .st-key-pa_player_slicer,
+    .st-key-pa_position_slicer,
+    .st-key-scatter_position_slicer,
     .st-key-maps_player_slicer {
         width: 100%;
         min-width: 220px;
@@ -2427,11 +2435,13 @@ st.markdown(
         min-height: 0 !important;
     }
     /* Keep slicer columns only as tall as their content */
+    [data-testid="stHorizontalBlock"]:has(.st-key-pa_position_slicer),
     [data-testid="stHorizontalBlock"]:has(.st-key-pa_position_blocks),
     [data-testid="stHorizontalBlock"]:has(.st-key-maps_position_blocks) {
         align-items: flex-start !important;
         margin-bottom: 0.25rem !important;
     }
+    .st-key-pa_position_slicer [data-testid="stVerticalBlock"],
     .st-key-pa_position_blocks [data-testid="stVerticalBlock"],
     .st-key-maps_position_blocks [data-testid="stVerticalBlock"],
     .st-key-pa_player_slicer [data-testid="stVerticalBlock"],
@@ -2842,6 +2852,91 @@ st.markdown(
         display: inline-flex;
         align-items: center;
         gap: 0.35rem;
+    }
+    .pa-pass-grade-card {
+        padding: 0.85rem 0.95rem 0.9rem;
+        margin-bottom: 0;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.62rem;
+    }
+    .pa-pass-grade-title {
+        margin: 0;
+        color: #cbd5e1;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+    .pa-pass-grade-shell {
+        position: relative;
+        padding: 0.15rem 0 1.55rem;
+    }
+    .pa-pass-grade-track {
+        position: relative;
+        height: 0.72rem;
+        border-radius: 999px;
+        overflow: hidden;
+        background: linear-gradient(90deg, #7f1d1d 0%, #b45309 24%, #ca8a04 42%, #65a30d 68%, #16a34a 100%);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+    .pa-pass-grade-track::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(15,23,42,0.18));
+        pointer-events: none;
+    }
+    .pa-pass-grade-glow {
+        position: absolute;
+        top: 50%;
+        width: 2.4rem;
+        height: 2.4rem;
+        transform: translate(-50%, -50%);
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(255,255,255,0.42) 0%, rgba(255,255,255,0.0) 72%);
+        pointer-events: none;
+        z-index: 1;
+    }
+    .pa-pass-grade-tier-warm .pa-pass-grade-glow {
+        background: radial-gradient(circle, rgba(250,204,21,0.45) 0%, rgba(250,204,21,0.0) 72%);
+    }
+    .pa-pass-grade-tier-hot .pa-pass-grade-glow {
+        background: radial-gradient(circle, rgba(74,222,128,0.5) 0%, rgba(74,222,128,0.0) 72%);
+    }
+    .pa-pass-grade-chip-wrap {
+        position: absolute;
+        top: 1.05rem;
+        transform: translateX(-50%);
+        z-index: 2;
+    }
+    .pa-pass-grade-chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 3.15rem;
+        padding: 0.34rem 0.72rem;
+        border-radius: 10px;
+        font-size: 1.28rem;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        color: #f8fafc;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        box-shadow: 0 8px 18px rgba(15, 23, 42, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+        background: linear-gradient(160deg, rgba(30, 41, 59, 0.92) 0%, rgba(15, 23, 42, 0.96) 100%);
+    }
+    .pa-pass-grade-chip.pa-pass-grade-low-sample {
+        opacity: 0.82;
+    }
+    .pa-pass-grade-meta {
+        margin: 0.42rem 0 0;
+        text-align: center;
+        color: #94a3b8;
+        font-size: 0.66rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
     }
     .pa-rating-panel {
         padding: 0.65rem 0.8rem;
@@ -3629,38 +3724,49 @@ def _comparison_pool_label(player: dict) -> str:
     return "posição"
 
 
-def _position_blocks_for_player(player: dict) -> set[str]:
+def _position_block_for_player(
+    player: dict,
+    blocks: tuple[tuple[str, str, frozenset[str] | None, str | None], ...] = PLAYER_ANALYSIS_POSITION_BLOCKS,
+) -> str:
     pos = _player_position_code(player)
     group = str(player.get("position_group") or "")
-    blocks: set[str] = set()
-    for block_id, _label, codes, rating_group in PLAYER_ANALYSIS_POSITION_BLOCKS:
+    for block_id, _label, codes, rating_group in blocks:
         if rating_group and group == rating_group:
-            blocks.add(block_id)
-        elif codes and pos in codes:
-            blocks.add(block_id)
-    if blocks:
-        return blocks
-    return {PLAYER_ANALYSIS_POSITION_BLOCKS[0][0]}
+            return block_id
+        if codes and pos in codes:
+            return block_id
+    return blocks[0][0]
 
 
-def _rating_group_for_block(block_id: str) -> str | None:
-    entry = PLAYER_POSITION_BLOCK_BY_ID.get(block_id)
-    if not entry:
-        return None
-    _label, codes, rating_group = entry
-    if rating_group:
-        return rating_group
-    if codes:
-        return rating_position_group(next(iter(codes)))
-    return None
+def _coerce_position_block_id(
+    raw: object,
+    blocks: tuple[tuple[str, str, frozenset[str] | None, str | None], ...],
+) -> str:
+    valid_ids = {block_id for block_id, *_rest in blocks}
+    block_id: str | None = None
+    if isinstance(raw, set):
+        block_id = next(iter(raw)) if raw else None
+    elif isinstance(raw, str):
+        block_id = raw
+    if block_id in _LEGACY_POSITION_BLOCK_IDS:
+        block_id = _LEGACY_POSITION_BLOCK_IDS[block_id]
+    if block_id not in valid_ids:
+        block_id = blocks[0][0]
+    return block_id
 
 
-def _rating_group_from_blocks(block_ids: set[str]) -> str | None:
-    for block_id in block_ids:
-        group = _rating_group_for_block(block_id)
-        if group:
-            return group
-    return None
+def _position_select_widget_key(key_prefix: str) -> str:
+    return f"{key_prefix}_position_select"
+
+
+def _sync_position_select_from_block(block_id: str, *, key_prefix: str) -> None:
+    st.session_state[_position_select_widget_key(key_prefix)] = block_id
+
+
+def _clear_position_select_widgets() -> None:
+    for key in list(st.session_state.keys()):
+        if key.endswith("_position_select"):
+            st.session_state.pop(key, None)
 
 
 def _render_position_block_slicer(
@@ -3670,25 +3776,23 @@ def _render_position_block_slicer(
     blocks: tuple[tuple[str, str, frozenset[str] | None, str | None], ...] = PLAYER_ANALYSIS_POSITION_BLOCKS,
     block_map: dict[str, tuple[str, frozenset[str] | None, str | None]] | None = None,
 ) -> tuple[frozenset[str], frozenset[str]]:
-    if state_key not in st.session_state or not st.session_state[state_key]:
-        st.session_state[state_key] = {blocks[0][0]}
+    block_ids = [block_id for block_id, *_rest in blocks]
+    labels_by_id = {block_id: label for block_id, label, *_rest in blocks}
+    current_block = _coerce_position_block_id(st.session_state.get(state_key), blocks)
+    st.session_state[state_key] = current_block
 
-    selected: set[str] = set(st.session_state[state_key])
-    st.markdown('<p class="pa-position-block-label">Posição</p>', unsafe_allow_html=True)
-    block_cols = st.columns(len(blocks))
-    new_selected: set[str] = set()
-    for col, (block_id, label, _codes, _rating_group) in zip(block_cols, blocks):
-        with col:
-            is_checked = st.checkbox(
-                label,
-                value=block_id in selected,
-                key=f"{key_prefix}_pos_cb_{block_id}",
-            )
-            if is_checked:
-                new_selected.add(block_id)
+    pos_select_key = _position_select_widget_key(key_prefix)
+    if pos_select_key not in st.session_state:
+        st.session_state[pos_select_key] = current_block
 
-    if new_selected != selected:
-        st.session_state[state_key] = new_selected
+    selected_block = st.selectbox(
+        "Posição",
+        options=block_ids,
+        format_func=lambda block_id: labels_by_id.get(block_id, block_id),
+        key=pos_select_key,
+    )
+    if selected_block != current_block:
+        st.session_state[state_key] = selected_block
         if state_key == PLAYER_ANALYSIS_POSITION_BLOCKS_KEY:
             st.session_state.pop(PLAYER_ANALYSIS_SELECT_KEY, None)
             _clear_player_select_widgets()
@@ -3696,7 +3800,7 @@ def _render_position_block_slicer(
         st.rerun()
 
     lookup = block_map or PLAYER_POSITION_BLOCK_BY_ID
-    return _position_filter_from_blocks(new_selected, block_map=lookup)
+    return _position_filter_from_blocks({selected_block}, block_map=lookup)
 
 
 def _player_select_widget_key(key_prefix: str) -> str:
@@ -3732,7 +3836,7 @@ def _player_analysis_options(
     position_groups: frozenset[str] = frozenset(),
     xp_by_id: dict[str, dict] | None = None,
     exclude_player_id: str | None = None,
-    sort_by: str = "xp_total",
+    sort_by: str = "xp_pass_rating",
 ) -> list[tuple[str, str, str, str]]:
     """Player slicer options ranked within selected position blocks."""
     ranked_rows: list[tuple[str, str, str, float]] = []
@@ -3751,6 +3855,9 @@ def _player_analysis_options(
         if sort_by == "dist_index_mean":
             sort_val = xp_profile.get("xp_dist_index_mean")
             sort_key = float(sort_val) if sort_val is not None else float("-inf")
+        elif sort_by == "xp_pass_rating":
+            rating_val = xp_profile.get("xp_pass_rating")
+            sort_key = float(rating_val) if rating_val is not None else float("-inf")
         else:
             sort_key = float(xp_profile.get("xp_m4_total", 0.0))
         ranked_rows.append((
@@ -3767,6 +3874,9 @@ def _player_analysis_options(
         if sort_by == "dist_index_mean":
             mean_val = xp_profile.get("xp_dist_index_mean")
             suffix = f"· Dist Index {float(mean_val):.2f}" if mean_val is not None else "· Dist Index —"
+        elif sort_by == "xp_pass_rating":
+            rating_val = xp_profile.get("xp_pass_rating")
+            suffix = f"· Pass {fmt_rating_score(rating_val)}" if rating_val is not None else "· Pass —"
         else:
             suffix = f"· xP {sort_key:.1f}"
         options.append((pid, name, team, f"#{idx} {name} ({team}) {suffix}"))
@@ -3780,22 +3890,22 @@ def _render_shared_player_slicers(
     *,
     xp_by_id: dict[str, dict] | None = None,
     key_prefix: str = "pa",
-    sort_by: str = "xp_total",
+    sort_by: str = "xp_pass_rating",
 ) -> str | None:
     """Position block slicer + player selectbox. Returns selected player_id or None."""
     _sync_player_analysis_selection(players_by_id, {})
 
     with st.container():
         st.markdown('<div class="pa-slicer-panel">', unsafe_allow_html=True)
-        pos_col, player_col = st.columns([2.1, 1], gap="medium")
+        pos_col, player_col = st.columns([1, 1], gap="medium")
         with pos_col:
-            with st.container(key=f"{key_prefix}_position_blocks"):
+            with st.container(key=f"{key_prefix}_position_slicer"):
                 position_codes, position_groups = _render_position_block_slicer(key_prefix=key_prefix)
         selected_label = None
         with player_col:
             with st.container(key=f"{key_prefix}_player_slicer"):
                 if not position_codes and not position_groups:
-                    st.info("Selecione pelo menos uma posição para filtrar jogadores.")
+                    st.info("Selecione uma posição para filtrar jogadores.")
                     st.markdown("</div>", unsafe_allow_html=True)
                     return None
                 options = _player_analysis_options(
@@ -3887,6 +3997,7 @@ def _render_player_only_slicer(
             position_codes=all_codes,
             position_groups=all_groups,
             xp_by_id=xp_by_id,
+            sort_by="xp_pass_rating",
         )
         if not options:
             st.info("Nenhum jogador disponível.")
@@ -4537,49 +4648,72 @@ def _placeholder_rating_block_html(label: str) -> str:
     )
 
 
+def _xp_pass_grade_pct(display_score: float) -> float:
+    """Map compressed pass grade (~4.5–7.5) to gradient position."""
+    return max(0.0, min(100.0, (display_score - 4.5) / 3.0 * 100.0))
+
+
+def _player_analysis_pass_grade_panel_html(
+    player: dict,
+    xp_profile: dict | None,
+) -> str:
+    if not xp_profile or xp_profile.get("xp_pass_rating") is None:
+        return (
+            '<div class="player-card pa-pass-grade-card">'
+            '<p class="pa-pass-grade-title">Overall Pass Grade</p>'
+            '<p class="pa-placeholder-note">Grade indisponível</p>'
+            "</div>"
+        )
+
+    merged = {**player, **xp_profile}
+    rating_val = float(xp_profile["xp_pass_rating"])
+    display_score = rating_val * 10.0
+    pct = _xp_pass_grade_pct(display_score)
+    tier = _xp_gradient_bar_tier(pct)
+    score_txt = html.escape(fmt_rating_score(rating_val))
+    rank = xp_profile.get("xp_pass_rating_rank_in_group")
+    total = xp_profile.get("xp_pass_rating_rank_pool_in_group")
+    rank_txt = (
+        f"#{int(rank)} de {int(total)} na posição"
+        if rank and total
+        else ""
+    )
+    low_cls = (
+        " pa-pass-grade-low-sample"
+        if _is_low_sample_rating(merged, rating_key="xp_pass_rating")
+        else ""
+    )
+    chip_bg = rating_value_color(display_score)
+    chip_txt = _badge_text_color(chip_bg)
+    meta_html = (
+        f'<p class="pa-pass-grade-meta">{html.escape(rank_txt)}</p>'
+        if rank_txt
+        else ""
+    )
+    return (
+        '<div class="player-card pa-pass-grade-card">'
+        '<p class="pa-pass-grade-title">Overall Pass Grade</p>'
+        f'<div class="pa-pass-grade-shell pa-pass-grade-tier-{tier}">'
+        '<div class="pa-pass-grade-track">'
+        f'<span class="pa-pass-grade-glow" style="left:{pct:.1f}%"></span>'
+        "</div>"
+        f'<div class="pa-pass-grade-chip-wrap" style="left:{pct:.1f}%">'
+        f'<span class="pa-pass-grade-chip{low_cls}" '
+        f'style="background:{chip_bg};color:{chip_txt}">{score_txt}</span>'
+        "</div>"
+        f"{meta_html}"
+        "</div>"
+        "</div>"
+    )
+
+
 def _player_analysis_rating_panel_html(
     player: dict,
     metric_ranks: dict,
     xp_profile: dict | None = None,
 ) -> str:
-    blocks = [
-        _placeholder_rating_block_html("Overall"),
-        '<div class="pa-rating-divider"></div>',
-    ]
-    if xp_profile and xp_profile.get("xp_pass_rating") is not None:
-        pass_ranks = dict(metric_ranks)
-        xp_metric_ranks = xp_profile.get("metric_ranks")
-        if isinstance(xp_metric_ranks, dict) and "xp_pass_rating" in xp_metric_ranks:
-            pass_ranks["xp_pass_rating"] = xp_metric_ranks["xp_pass_rating"]
-        else:
-            rank = xp_profile.get("xp_pass_rating_rank_in_group")
-            total = xp_profile.get("xp_pass_rating_rank_pool_in_group")
-            if rank and total:
-                pass_ranks["xp_pass_rating"] = {
-                    "rank": int(rank),
-                    "total": int(total),
-                    "value": xp_profile.get("xp_pass_rating"),
-                }
-        pass_player = {**player, **xp_profile}
-        blocks.append(
-            _player_analysis_rating_block_html(
-                pass_player,
-                pass_ranks,
-                rating_key="xp_pass_rating",
-                label="Pass",
-            )
-        )
-    else:
-        blocks.append(_placeholder_rating_block_html("Pass"))
-    blocks.extend([
-        '<div class="pa-rating-divider"></div>',
-        _placeholder_rating_block_html("Carry"),
-    ])
-    return (
-        '<div class="player-card pa-rating-panel">'
-        f'<div class="pa-rating-row">{"".join(blocks)}</div>'
-        "</div>"
-    )
+    _ = metric_ranks
+    return _player_analysis_pass_grade_panel_html(player, xp_profile)
 
 
 def _section_metric_avg_rank_bar_html(player: dict, keys: tuple[str, ...]) -> str:
@@ -6073,7 +6207,9 @@ def _sync_player_analysis_selection(
     if qp_id and qp_id in players_by_id:
         player = players_by_id[qp_id]
         if st.session_state.get("_pa_url_player_id") != qp_id:
-            st.session_state[PLAYER_ANALYSIS_POSITION_BLOCKS_KEY] = _position_blocks_for_player(player)
+            block_id = _position_block_for_player(player)
+            st.session_state[PLAYER_ANALYSIS_POSITION_BLOCKS_KEY] = block_id
+            _sync_position_select_from_block(block_id, key_prefix="pa")
         if st.session_state.get("_pa_url_player_id") != qp_id:
             st.session_state["_pa_url_player_id"] = qp_id
             st.session_state["map_player_id"] = qp_id
@@ -6568,7 +6704,7 @@ def render_scatter_section(
         st.info("No players available.")
         return
 
-    with st.container(key="scatter_position_blocks"):
+    with st.container(key="scatter_position_slicer"):
         position_codes, position_groups = _render_position_block_slicer(
             key_prefix="scatter",
             state_key=SCATTER_POSITION_BLOCKS_KEY,
@@ -6577,7 +6713,7 @@ def render_scatter_section(
         )
 
     if not position_codes and not position_groups:
-        st.info("Selecione pelo menos uma posição para ver o gráfico.")
+        st.info("Selecione uma posição para ver o gráfico.")
         return
 
     metric_options = xstats.iter_scatter_base_metric_options()
