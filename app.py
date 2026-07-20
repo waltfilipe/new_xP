@@ -164,10 +164,14 @@ PLAYER_ANALYSIS_COMPARE_KEY = "pa_compare_select"
 PLAYER_ANALYSIS_POSITION_BLOCKS_KEY = "pa_position_blocks"
 MAPS_SHORT_PASS_ONLY_KEY = "maps_short_pass_only"
 MAPS_XP_THREAT_ONLY_KEY = "maps_xp_threat_only"
+MAPS_VIEW_TYPE_KEY = "maps_view_type"
+MAPS_THREAT_BAND_KEY = "maps_threat_band"
 MAPS_SPECIAL_PASS_KEY = "maps_special_pass_filter"
 MAPS_PASS_SELECT_KEY = "maps_pass_select"
 SCATTER_X_METRIC_KEY = "scatter_x_metric"
 SCATTER_Y_METRIC_KEY = "scatter_y_metric"
+SCATTER_X_BAND_KEY = "scatter_x_band"
+SCATTER_Y_BAND_KEY = "scatter_y_band"
 SCATTER_POSITION_BLOCKS_KEY = "scatter_position_blocks"
 SCATTER_HIGHLIGHT_PLAYER_KEY = "scatter_highlight_player"
 ESTUDO_PLAYER_SELECT_KEY = "estudo_player_select"
@@ -5652,6 +5656,10 @@ def _filter_special_passes_for_map(passes_df, special_pass_key: str):
     return xstats.filter_passes_by_special_type(passes_df, special_pass_key)
 
 
+def _filter_threat_passes_for_map(passes_df, threat_band_key: str):
+    return xstats.filter_passes_by_threat_type(passes_df, threat_band_key)
+
+
 def _maps_passes_table(pass_df) -> "pd.DataFrame":
     import pandas as pd
 
@@ -5672,8 +5680,8 @@ def _maps_pass_option_label(row, index: int) -> str:
     return f"#{index + 1} · xP {xp:.3f} · Δ {residual:+.3f} · {dist:.0f} m · {match}"
 
 
-def _maps_pass_select_key(player_id: str, special_pass_key: str) -> str:
-    return f"{MAPS_PASS_SELECT_KEY}_{player_id}_{special_pass_key}"
+def _maps_pass_select_key(player_id: str, map_filter_key: str) -> str:
+    return f"{MAPS_PASS_SELECT_KEY}_{player_id}_{map_filter_key}"
 
 
 def _xp_stats_metric_ranks_dict(profile: dict, keys: tuple[str, ...]) -> dict:
@@ -5860,7 +5868,7 @@ def build_stats_scatter_figure(
         })
 
     fig = go.Figure()
-    mean_gold = "rgba(251, 191, 36, 0.34)"
+    mean_gold = "rgba(251, 191, 36, 0.16)"
 
     regular = [p for p in points if p["player_id"] != str(highlight_player_id or "")]
     highlighted = [p for p in points if p["player_id"] == str(highlight_player_id or "")]
@@ -5884,8 +5892,8 @@ def build_stats_scatter_figure(
                 name="Jogadores",
                 marker=dict(
                     size=regular_sizes,
-                    color="rgba(96, 165, 250, 0.84)",
-                    line=dict(width=0.8, color="#1e3a5f"),
+                    color="rgba(168, 85, 247, 0.86)",
+                    line=dict(width=0.8, color="#581c87"),
                 ),
                 text=[p["name"] for p in regular],
                 customdata=[
@@ -5919,8 +5927,8 @@ def build_stats_scatter_figure(
     if points:
         mean_x = sum(float(p["x"]) for p in points) / len(points)
         mean_y = sum(float(p["y"]) for p in points) / len(points)
-        fig.add_vline(x=mean_x, line_color=mean_gold, line_width=1.4)
-        fig.add_hline(y=mean_y, line_color=mean_gold, line_width=1.4)
+        fig.add_vline(x=mean_x, line_color=mean_gold, line_width=1.1)
+        fig.add_hline(y=mean_y, line_color=mean_gold, line_width=1.1)
 
     fig.update_layout(
         title=dict(
@@ -6005,28 +6013,46 @@ def render_scatter_section(
         st.info("Selecione uma posição para ver o gráfico.")
         return
 
-    metric_options = xstats.iter_stats_metric_options()
+    metric_options = xstats.iter_scatter_base_metric_options()
     metric_keys = [key for key, _label in metric_options]
     metric_labels = {key: label for key, label in metric_options}
+    band_keys = [key for key, _label in xstats.SCATTER_BAND_OPTIONS]
+    band_labels = {key: label for key, label in xstats.SCATTER_BAND_OPTIONS}
 
     metric_col, player_col = st.columns([2.1, 1], gap="medium")
     with metric_col:
         axis_x_col, axis_y_col = st.columns(2, gap="small")
         with axis_x_col:
-            x_key = st.selectbox(
+            x_base_key = st.selectbox(
                 "Eixo X",
                 options=metric_keys,
                 format_func=lambda key: metric_labels[key],
                 index=_scatter_default_metric_index(metric_keys, "xp_m4_per_pass"),
                 key=SCATTER_X_METRIC_KEY,
             )
+            x_band = st.selectbox(
+                "Faixa X",
+                options=band_keys,
+                format_func=lambda key: band_labels[key],
+                index=0,
+                key=SCATTER_X_BAND_KEY,
+                disabled=x_base_key not in xstats.SCATTER_BANDED_BASE_KEYS,
+            )
         with axis_y_col:
-            y_key = st.selectbox(
+            y_base_key = st.selectbox(
                 "Eixo Y",
                 options=metric_keys,
                 format_func=lambda key: metric_labels[key],
                 index=_scatter_default_metric_index(metric_keys, "xp_m4_total"),
                 key=SCATTER_Y_METRIC_KEY,
+            )
+            y_band = st.selectbox(
+                "Faixa Y",
+                options=band_keys,
+                format_func=lambda key: band_labels[key],
+                index=0,
+                key=SCATTER_Y_BAND_KEY,
+                disabled=y_base_key not in xstats.SCATTER_BANDED_BASE_KEYS,
             )
 
     highlight_player_id: str | None = None
@@ -6070,8 +6096,10 @@ def render_scatter_section(
         SCATTER_POSITION_BLOCKS_KEY,
         blocks=SCATTER_POSITION_BLOCKS,
     )
-    x_label = metric_labels[x_key]
-    y_label = metric_labels[y_key]
+    x_key = xstats.resolve_scatter_metric_key(x_base_key, x_band)
+    y_key = xstats.resolve_scatter_metric_key(y_base_key, y_band)
+    x_label = xstats.scatter_axis_label(x_base_key, x_band)
+    y_label = xstats.scatter_axis_label(y_base_key, y_band)
 
     fig = build_stats_scatter_figure(
         pool,
@@ -6179,24 +6207,44 @@ def render_maps_section(
         st.warning("Could not load player profile.")
         return
 
-    special_pass_key = st.selectbox(
-        "Special pass",
-        options=list(xstats.SPECIAL_PASS_MAP_FILTER_KEYS),
-        format_func=xstats.special_pass_map_label,
-        key=MAPS_SPECIAL_PASS_KEY,
-    )
+    filter_col1, filter_col2 = st.columns(2, gap="medium")
+    with filter_col1:
+        map_view = st.selectbox(
+            "Tipo de mapa",
+            options=("special", "threat"),
+            format_func=lambda key: "Special pass" if key == "special" else "xP Threat Passes",
+            key=MAPS_VIEW_TYPE_KEY,
+        )
+    with filter_col2:
+        if map_view == "special":
+            map_filter_key = st.selectbox(
+                "Special pass",
+                options=list(xstats.SPECIAL_PASS_MAP_FILTER_KEYS),
+                format_func=xstats.special_pass_map_label,
+                key=MAPS_SPECIAL_PASS_KEY,
+            )
+            map_category_label = xstats.special_pass_map_label(map_filter_key)
+        else:
+            map_filter_key = st.selectbox(
+                "xP Threat Passes",
+                options=list(xstats.THREAT_PASS_MAP_FILTER_KEYS),
+                format_func=xstats.threat_pass_map_label,
+                key=MAPS_THREAT_BAND_KEY,
+            )
+            map_category_label = f"xP Threat Passes · {xstats.threat_pass_map_label(map_filter_key)}"
 
     st.markdown('<div class="pa-maps-compact">', unsafe_allow_html=True)
-    passes_df = _filter_special_passes_for_map(
-        xp_passes_by_player.get(str(player_id)),
-        special_pass_key,
-    )
+    raw_passes = xp_passes_by_player.get(str(player_id))
+    if map_view == "special":
+        passes_df = _filter_special_passes_for_map(raw_passes, map_filter_key)
+    else:
+        passes_df = _filter_threat_passes_for_map(raw_passes, map_filter_key)
     if passes_df is None or passes_df.empty:
         st.info("Nenhum passe completo para este jogador com o filtro selecionado.")
     else:
         work = _maps_passes_table(passes_df)
         labels = [_maps_pass_option_label(work.iloc[i], i) for i in range(len(work))]
-        select_key = _maps_pass_select_key(str(player_id), special_pass_key)
+        select_key = _maps_pass_select_key(str(player_id), f"{map_view}_{map_filter_key}")
 
         map_col, panel_col = st.columns([1.7, 1], gap="medium")
         with panel_col:
@@ -6228,7 +6276,7 @@ def render_maps_section(
                 work,
                 player_name=str(player.get("player_name", "—")),
                 season_label=APP_LEAGUE,
-                category_label=xstats.special_pass_map_label(special_pass_key),
+                category_label=map_category_label,
                 xp_col="xp_m4",
                 highlight_index=selected_idx,
             )

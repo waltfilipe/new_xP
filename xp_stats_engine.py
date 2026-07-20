@@ -427,6 +427,8 @@ def iter_xp_stats_sections() -> tuple[tuple[str, tuple[str, ...]], ...]:
 
 XP_STATS_LABELS: dict[str, str] = {
     "xp_per_90": "xP (Per game)",
+    "xp_m4_total": "xP Total",
+    "xp_m4_threat_passes_p90": "xP Threat Passes (Per game)",
     "xp_m4_per_pass": "xP/Passe",
     "xp_m4_threat_rate": "% Threat Passes",
     "xp_m4_per_pass_short": "xP/Passe",
@@ -485,6 +487,96 @@ def iter_stats_metric_options() -> tuple[tuple[str, str], ...]:
             if key not in seen:
                 seen[key] = stats_metric_label(key)
     return tuple(seen.items())
+
+
+SCATTER_BAND_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("total", "Total"),
+    ("short", f"Short ({DISTANCE_BAND_LABELS['short']})"),
+    ("medium", f"Medium ({DISTANCE_BAND_LABELS['medium']})"),
+    ("long", f"Long ({DISTANCE_BAND_LABELS['long']})"),
+)
+SCATTER_BANDED_BASE_KEYS: frozenset[str] = frozenset({
+    "xp_m4_total",
+    "xp_m4_per_pass",
+    "xp_m4_threat_passes_p90",
+    "xp_m4_threat_rate",
+})
+SCATTER_EXTRA_BASE_KEYS: tuple[tuple[str, str], ...] = (
+    ("xp_m4_total", "xP Total"),
+    ("xp_m4_threat_passes_p90", "xP Threat Passes (Per game)"),
+)
+
+
+def _is_scatter_band_variant_key(key: str) -> bool:
+    if key.endswith(("_short", "_medium", "_long")):
+        return True
+    return key in {
+        "xp_m4_threat_short_p90",
+        "xp_m4_threat_medium_p90",
+        "xp_m4_threat_long_p90",
+    }
+
+
+def iter_scatter_base_metric_options() -> tuple[tuple[str, str], ...]:
+    """Base Stats metrics for scatter axes (band chosen separately)."""
+    seen: dict[str, str] = {}
+    for key, label in iter_stats_metric_options():
+        if _is_scatter_band_variant_key(key):
+            continue
+        seen[key] = label
+    for key, label in SCATTER_EXTRA_BASE_KEYS:
+        seen.setdefault(key, label)
+    return tuple(seen.items())
+
+
+def resolve_scatter_metric_key(base_key: str, band: str) -> str:
+    """Map base metric + distance band to the player-profile column key."""
+    if band == "total" or base_key not in SCATTER_BANDED_BASE_KEYS:
+        return base_key
+    if base_key == "xp_m4_threat_passes_p90":
+        return f"xp_m4_threat_{band}_p90"
+    return f"{base_key}_{band}"
+
+
+def scatter_axis_label(base_key: str, band: str) -> str:
+    base_label = stats_metric_label(base_key)
+    if band == "total" or base_key not in SCATTER_BANDED_BASE_KEYS:
+        return base_label
+    band_label = DISTANCE_BAND_LABELS.get(band, band)
+    return f"{base_label} · {band_label}"
+
+
+THREAT_PASS_MAP_FILTERS: tuple[tuple[str, str], ...] = (
+    ("all", "Total"),
+    ("short", f"Short ({DISTANCE_BAND_LABELS['short']})"),
+    ("medium", f"Medium ({DISTANCE_BAND_LABELS['medium']})"),
+    ("long", f"Long ({DISTANCE_BAND_LABELS['long']})"),
+)
+THREAT_PASS_MAP_FILTER_KEYS: tuple[str, ...] = tuple(key for key, _label in THREAT_PASS_MAP_FILTERS)
+THREAT_PASS_MAP_FILTER_LABELS: dict[str, str] = dict(THREAT_PASS_MAP_FILTERS)
+
+
+def threat_pass_map_label(filter_key: str) -> str:
+    return THREAT_PASS_MAP_FILTER_LABELS.get(str(filter_key), str(filter_key))
+
+
+def filter_passes_by_threat_type(passes: pd.DataFrame, filter_key: str) -> pd.DataFrame:
+    """Return completed xP threat passes, optionally filtered by distance band."""
+    work = _completed_pass_frame(passes)
+    if work.empty:
+        return work
+    if THREAT_COL not in work.columns:
+        return work.iloc[0:0].copy()
+    work = work[work[THREAT_COL]].copy()
+    band = str(filter_key or "all").strip()
+    if band in {"", "all"}:
+        return work
+    if band not in BANDS:
+        return work.iloc[0:0].copy()
+    if "distance_band" not in work.columns:
+        work = work.copy()
+        work["distance_band"] = xse._distance_band_series(work["pass_distance"])
+    return work[work["distance_band"].astype(str) == band].copy()
 
 
 XP_STATS_RANK_METRICS: tuple[str, ...] = tuple(
