@@ -162,6 +162,9 @@ PLAYER_ANALYSIS_SHOW_SIMILAR_KEY = "pa_show_similar"
 PLAYER_ANALYSIS_SIMILAR_PICK_KEY = "pa_similar_pick"
 PLAYER_ANALYSIS_COMPARE_KEY = "pa_compare_select"
 PLAYER_ANALYSIS_POSITION_BLOCKS_KEY = "pa_position_blocks"
+PA_URL_PLAYER_KEY = "_pa_url_player_id"
+PA_USER_PLAYER_PICK_KEY = "_pa_user_player_pick"
+PA_USER_POSITION_PICK_KEY = "_pa_user_position_pick"
 MAPS_SHORT_PASS_ONLY_KEY = "maps_short_pass_only"
 MAPS_XP_THREAT_ONLY_KEY = "maps_xp_threat_only"
 MAPS_VIEW_TYPE_KEY = "maps_view_type"
@@ -3899,6 +3902,7 @@ def _render_position_block_slicer(
         or (previous_block is not None and previous_block != selected_block)
     )
     if position_changed and state_key == PLAYER_ANALYSIS_POSITION_BLOCKS_KEY:
+        _mark_user_position_pick()
         _clear_position_block_player_selection()
 
     st.session_state[prev_key] = selected_block
@@ -3911,12 +3915,36 @@ def _player_select_widget_key(key_prefix: str) -> str:
     return f"{key_prefix}_{PLAYER_ANALYSIS_SELECT_KEY}"
 
 
+def _clear_url_player_query_param() -> None:
+    try:
+        if "player_id" in st.query_params:
+            del st.query_params["player_id"]
+    except Exception:
+        try:
+            st.query_params.pop("player_id", None)
+        except Exception:
+            pass
+
+
+def _mark_user_position_pick() -> None:
+    st.session_state[PA_USER_POSITION_PICK_KEY] = True
+    st.session_state.pop(PA_USER_PLAYER_PICK_KEY, None)
+
+
+def _mark_user_player_pick() -> None:
+    st.session_state[PA_USER_PLAYER_PICK_KEY] = True
+    _clear_url_player_query_param()
+    st.session_state.pop(PA_URL_PLAYER_KEY, None)
+
+
 def _sync_player_select_from_map_id(
     label_by_id: dict[str, str],
     labels: list[str],
     *,
     key_prefix: str,
 ) -> None:
+    if st.session_state.get(PA_USER_PLAYER_PICK_KEY):
+        return
     select_key = _player_select_widget_key(key_prefix)
     map_id = st.session_state.get("map_player_id")
     if map_id and str(map_id) in label_by_id:
@@ -3997,8 +4025,6 @@ def _render_shared_player_slicers(
     sort_by: str = "xp_pass_rating",
 ) -> str | None:
     """Position block slicer + player selectbox. Returns selected player_id or None."""
-    _sync_player_analysis_selection(players_by_id, {})
-
     with st.container():
         st.markdown('<div class="pa-slicer-panel">', unsafe_allow_html=True)
         pos_col, player_col = st.columns([1, 1], gap="medium")
@@ -4029,7 +4055,7 @@ def _render_shared_player_slicers(
                 id_by_label = {o[3]: o[0] for o in options}
                 label_by_id = {o[0]: o[3] for o in options}
 
-                _sync_player_analysis_selection(players_by_id, label_by_id)
+                _sync_player_analysis_selection(players_by_id, label_by_id, key_prefix=key_prefix)
 
                 select_key = _player_select_widget_key(key_prefix)
                 current_label = st.session_state.get(select_key)
@@ -4056,18 +4082,12 @@ def _render_shared_player_slicers(
     prev_id = st.session_state.get("map_player_id")
     st.session_state["map_player_id"] = player_id
     if prev_id != player_id:
+        _mark_user_player_pick()
         st.session_state["pa_last_player_id"] = player_id
         st.session_state.pop(PLAYER_ANALYSIS_SIMILAR_PICK_KEY, None)
         st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
         if st.query_params.get("similar_idx") is None and st.query_params.get("pa_similar") != "1":
             st.session_state.pop(PLAYER_ANALYSIS_SHOW_SIMILAR_KEY, None)
-        url_pick = st.query_params.get("player_id")
-        if url_pick and str(url_pick) != str(player_id):
-            try:
-                del st.query_params["player_id"]
-            except Exception:
-                pass
-            st.session_state.pop("_pa_url_player_id", None)
     return player_id
 
 
@@ -4091,8 +4111,6 @@ def _render_player_only_slicer(
     key_prefix: str = "maps",
 ) -> str | None:
     """Player selectbox only (no position blocks) — used on Maps tab."""
-    _sync_player_analysis_selection(players_by_id, {})
-
     with st.container(key=f"{key_prefix}_player_slicer"):
         all_codes, all_groups = _all_position_filters()
         options = _player_analysis_options(
@@ -4111,7 +4129,7 @@ def _render_player_only_slicer(
         id_by_label = {o[3]: o[0] for o in options}
         label_by_id = {o[0]: o[3] for o in options}
 
-        _sync_player_analysis_selection(players_by_id, label_by_id)
+        _sync_player_analysis_selection(players_by_id, label_by_id, key_prefix=key_prefix)
 
         select_key = _player_select_widget_key(key_prefix)
         current_label = st.session_state.get(select_key)
@@ -4136,18 +4154,12 @@ def _render_player_only_slicer(
     prev_id = st.session_state.get("map_player_id")
     st.session_state["map_player_id"] = player_id
     if prev_id != player_id:
+        _mark_user_player_pick()
         st.session_state["pa_last_player_id"] = player_id
         st.session_state.pop(PLAYER_ANALYSIS_SIMILAR_PICK_KEY, None)
         st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
         if st.query_params.get("similar_idx") is None and st.query_params.get("pa_similar") != "1":
             st.session_state.pop(PLAYER_ANALYSIS_SHOW_SIMILAR_KEY, None)
-        url_pick = st.query_params.get("player_id")
-        if url_pick and str(url_pick) != str(player_id):
-            try:
-                del st.query_params["player_id"]
-            except Exception:
-                pass
-            st.session_state.pop("_pa_url_player_id", None)
     return player_id
 
 
@@ -5709,7 +5721,8 @@ def _build_player_analysis_layout_html(
 
 
 def render_player_analysis_profile(player: dict, **kwargs) -> None:
-    st.html(_build_player_analysis_layout_html(player, **kwargs), width="stretch")
+    profile_key = f"pa_profile_{player.get('player_id', 'none')}"
+    st.html(_build_player_analysis_layout_html(player, **kwargs), width="stretch", key=profile_key)
 
 
 def _section_grade_body_html(
@@ -6330,29 +6343,42 @@ def render_progression_maps_only(player: dict, passes, carries, *, compact: bool
 def _sync_player_analysis_selection(
     players_by_id: dict[str, dict],
     label_by_id: dict[str, str],
+    *,
+    key_prefix: str = "pa",
 ) -> None:
-    """Sync slicer from URL picks only — never override a manual selection."""
+    """Sync slicer from URL deep-links only until the user picks position/player manually."""
     qp = st.query_params.get("player_id")
     qp_id = str(qp) if qp else None
-    if qp_id and qp_id in players_by_id:
-        player = players_by_id[qp_id]
-        if st.session_state.get("_pa_url_player_id") != qp_id:
+    if not qp_id or qp_id not in players_by_id:
+        st.session_state.pop(PA_URL_PLAYER_KEY, None)
+        return
+
+    if qp_id != st.session_state.get(PA_URL_PLAYER_KEY):
+        st.session_state.pop(PA_USER_PLAYER_PICK_KEY, None)
+        st.session_state.pop(PA_USER_POSITION_PICK_KEY, None)
+
+    if st.session_state.get(PA_USER_PLAYER_PICK_KEY) or st.session_state.get(PA_USER_POSITION_PICK_KEY):
+        return
+
+    player = players_by_id[qp_id]
+    url_synced_now = False
+    if qp_id != st.session_state.get(PA_URL_PLAYER_KEY):
+        if key_prefix == "pa" and not st.session_state.get(PA_USER_POSITION_PICK_KEY):
             block_id = _position_block_for_player(player)
             _sync_position_block_state(
                 block_id,
                 state_key=PLAYER_ANALYSIS_POSITION_BLOCKS_KEY,
                 key_prefix="pa",
             )
-        if st.session_state.get("_pa_url_player_id") != qp_id:
-            st.session_state["_pa_url_player_id"] = qp_id
-            st.session_state["map_player_id"] = qp_id
-            if qp_id in label_by_id:
-                label = label_by_id[qp_id]
-                st.session_state[PLAYER_ANALYSIS_SELECT_KEY] = label
-                st.session_state[_player_select_widget_key("pa")] = label
-                st.session_state[_player_select_widget_key("maps")] = label
-    elif qp_id is None:
-        st.session_state.pop("_pa_url_player_id", None)
+        st.session_state[PA_URL_PLAYER_KEY] = qp_id
+        st.session_state["map_player_id"] = qp_id
+        url_synced_now = True
+
+    if qp_id in label_by_id:
+        label = label_by_id[qp_id]
+        select_key = _player_select_widget_key(key_prefix)
+        if url_synced_now or select_key not in st.session_state:
+            st.session_state[select_key] = label
 
 
 def _prepare_sb_to_sa_similarity_context(
