@@ -19,9 +19,11 @@ CENTRAL_Y_MIN = 20.0
 CENTRAL_Y_MAX = 60.0
 LATERAL_INNER_SHARE = 0.30
 LINE_BREAK_FORWARD_ANGLE_DEG = 40.0
-LINE_BREAK_DIST_MIN_M = 15.0
-LINE_BREAK_DIST_MAX_M = 20.0
-LINE_BREAK_MIN_START_X = FIRST_THIRD_X
+LINE_BREAK_FIELD_BEFORE_30_X = FIELD_X * 0.30
+LINE_BREAK_FIELD_MID_50_X = FIELD_X * 0.50
+LINE_BREAK_DIST_MIN_ATTACK_M = 10.0
+LINE_BREAK_DIST_MIN_MID_M = 15.0
+LINE_BREAK_DIST_MAX_M = 25.0
 PENALTY_X_MIN = pe.PENALTY_BOX_X_MIN
 PENALTY_Y_MIN = pe.PENALTY_BOX_Y_MIN
 PENALTY_Y_MAX = pe.PENALTY_BOX_Y_MAX
@@ -102,8 +104,22 @@ def _line_break_origin_corridor(y: np.ndarray) -> np.ndarray:
     right_inner = (y > CENTRAL_Y_MAX) & (
         y <= CENTRAL_Y_MAX + (FIELD_Y - CENTRAL_Y_MAX) * LATERAL_INNER_SHARE
     )
-    central = (y >= CENTRAL_Y_MIN) & (y <= CENTRAL_Y_MAX)
+    central = _is_central_corridor(y)
     return central | left_inner | right_inner
+
+
+def _line_break_distance_ok(x_start: np.ndarray, dist: np.ndarray) -> np.ndarray:
+    """Distance bands by origin zone: none before 30%, 15–25 m at 30–50%, 10–25 m in attack."""
+    before_30 = x_start <= LINE_BREAK_FIELD_BEFORE_30_X
+    mid_zone = (x_start > LINE_BREAK_FIELD_BEFORE_30_X) & (x_start <= LINE_BREAK_FIELD_MID_50_X)
+    attack_zone = x_start > LINE_BREAK_FIELD_MID_50_X
+    return (
+        ~before_30
+        & (
+            (mid_zone & (dist >= LINE_BREAK_DIST_MIN_MID_M) & (dist <= LINE_BREAK_DIST_MAX_M))
+            | (attack_zone & (dist >= LINE_BREAK_DIST_MIN_ATTACK_M) & (dist <= LINE_BREAK_DIST_MAX_M))
+        )
+    )
 
 
 def _is_forward_angle(dx: np.ndarray, dy: np.ndarray, *, max_angle_deg: float) -> np.ndarray:
@@ -168,16 +184,22 @@ def compute_special_pass_masks(scored: pd.DataFrame) -> dict[str, np.ndarray]:
     start_zone = _zone_x(x_start)
     long_pass = _is_long_pass(scored, dist)
     lateral_start = _is_lateral_corridor(y_start)
+    lateral_end = _is_lateral_corridor(y_end)
     in_box = _in_penalty_box(x_end, y_end)
 
     return {
-        "diagonal_long": long_pass & _is_diagonal_long_pass(y_start, y_end),
+        "diagonal_long": (
+            long_pass
+            & (x_start <= DEF_X_MAX)
+            & (x_end >= FINAL_X_MIN)
+            & lateral_end
+            & _is_diagonal_long_pass(y_start, y_end)
+        ),
         "line_break": (
             _line_break_origin_corridor(y_start)
-            & (x_start > LINE_BREAK_MIN_START_X)
-            & (dist >= LINE_BREAK_DIST_MIN_M)
-            & (dist <= LINE_BREAK_DIST_MAX_M)
+            & _is_central_corridor(y_end)
             & (x_end > x_start)
+            & _line_break_distance_ok(x_start, dist)
             & _is_forward_angle(dx, dy, max_angle_deg=LINE_BREAK_FORWARD_ANGLE_DEG)
         ),
         "inversion": long_pass & _is_left_right_inversion(y_start, y_end),
