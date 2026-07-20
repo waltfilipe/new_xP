@@ -165,8 +165,10 @@ PLAYER_ANALYSIS_POSITION_BLOCKS_KEY = "pa_position_blocks"
 MAPS_SHORT_PASS_ONLY_KEY = "maps_short_pass_only"
 MAPS_XP_THREAT_ONLY_KEY = "maps_xp_threat_only"
 MAPS_SPECIAL_PASS_KEY = "maps_special_pass_filter"
-STATS_XP_SCATTER_DISTANCE_KEY = "stats_xp_scatter_distance"
-STATS_SCATTER_POSITION_BLOCKS_KEY = "stats_scatter_position_blocks"
+SCATTER_X_METRIC_KEY = "scatter_x_metric"
+SCATTER_Y_METRIC_KEY = "scatter_y_metric"
+SCATTER_POSITION_BLOCKS_KEY = "scatter_position_blocks"
+SCATTER_HIGHLIGHT_PLAYER_KEY = "scatter_highlight_player"
 ESTUDO_PLAYER_SELECT_KEY = "estudo_player_select"
 PLAYER_ANALYSIS_POSITION_BLOCKS: tuple[tuple[str, str, frozenset[str] | None, str | None], ...] = (
     ("cb", "Zagueiros", frozenset({"CB", "RCB", "LCB"}), None),
@@ -178,9 +180,21 @@ PLAYER_ANALYSIS_POSITION_BLOCKS: tuple[tuple[str, str, frozenset[str] | None, st
     ("lw", "Extremos Esquerdos", frozenset({"LW", "LM", "LCF"}), None),
     ("st", "Atacantes", frozenset({"ST", "CF", "SS"}), None),
 )
+SCATTER_POSITION_BLOCKS: tuple[tuple[str, str, frozenset[str] | None, str | None], ...] = (
+    ("cb", "Zagueiros", frozenset({"CB", "RCB", "LCB"}), "centerbacks"),
+    ("fb", "Laterais", frozenset({"RB", "LB", "RWB", "LWB"}), "fullbacks"),
+    ("cm", "Meio-campistas", None, "central_midfielders"),
+    ("am", "Meias-avançados", None, "attacking_midfielders"),
+    ("wg", "Extremos", frozenset({"RW", "LW", "RM", "LM", "RCF", "LCF"}), "wingers"),
+    ("st", "Atacantes", frozenset({"ST", "CF", "SS"}), "strikers"),
+)
 PLAYER_POSITION_BLOCK_BY_ID: dict[str, tuple[str, frozenset[str] | None, str | None]] = {
     block_id: (label, codes, rating_group)
     for block_id, label, codes, rating_group in PLAYER_ANALYSIS_POSITION_BLOCKS
+}
+SCATTER_POSITION_BLOCK_BY_ID: dict[str, tuple[str, frozenset[str] | None, str | None]] = {
+    block_id: (label, codes, rating_group)
+    for block_id, label, codes, rating_group in SCATTER_POSITION_BLOCKS
 }
 _RATING_GROUP_BLOCK_IDS: dict[str, frozenset[str]] = {
     "centerbacks": frozenset({"cb"}),
@@ -3246,11 +3260,16 @@ def _player_position_code(player: dict) -> str:
     return str(player.get("position") or "").strip().upper()
 
 
-def _position_filter_from_blocks(block_ids: set[str]) -> tuple[frozenset[str], frozenset[str]]:
+def _position_filter_from_blocks(
+    block_ids: set[str],
+    *,
+    block_map: dict[str, tuple[str, frozenset[str] | None, str | None]] | None = None,
+) -> tuple[frozenset[str], frozenset[str]]:
     codes: set[str] = set()
     groups: set[str] = set()
+    lookup = block_map or PLAYER_POSITION_BLOCK_BY_ID
     for block_id in block_ids:
-        entry = PLAYER_POSITION_BLOCK_BY_ID.get(block_id)
+        entry = lookup.get(block_id)
         if not entry:
             continue
         _label, block_codes, rating_group = entry
@@ -3333,14 +3352,16 @@ def _render_position_block_slicer(
     *,
     key_prefix: str = "pa",
     state_key: str = PLAYER_ANALYSIS_POSITION_BLOCKS_KEY,
+    blocks: tuple[tuple[str, str, frozenset[str] | None, str | None], ...] = PLAYER_ANALYSIS_POSITION_BLOCKS,
+    block_map: dict[str, tuple[str, frozenset[str] | None, str | None]] | None = None,
 ) -> tuple[frozenset[str], frozenset[str]]:
     if state_key not in st.session_state or not st.session_state[state_key]:
-        st.session_state[state_key] = {PLAYER_ANALYSIS_POSITION_BLOCKS[0][0]}
+        st.session_state[state_key] = {blocks[0][0]}
 
     selected: set[str] = set(st.session_state[state_key])
     st.markdown('<p class="pa-position-block-label">Posição</p>', unsafe_allow_html=True)
-    block_cols = st.columns(len(PLAYER_ANALYSIS_POSITION_BLOCKS))
-    for col, (block_id, label, _codes, _rating_group) in zip(block_cols, PLAYER_ANALYSIS_POSITION_BLOCKS):
+    block_cols = st.columns(len(blocks))
+    for col, (block_id, label, _codes, _rating_group) in zip(block_cols, blocks):
         with col:
             is_selected = block_id in selected
             if st.button(
@@ -3356,7 +3377,8 @@ def _render_position_block_slicer(
                     st.session_state.pop(PLAYER_ANALYSIS_COMPARE_KEY, None)
                 st.rerun()
 
-    return _position_filter_from_blocks(selected)
+    lookup = block_map or PLAYER_POSITION_BLOCK_BY_ID
+    return _position_filter_from_blocks(selected, block_map=lookup)
 
 
 def _player_select_widget_key(key_prefix: str) -> str:
@@ -5698,29 +5720,15 @@ def _build_stats_panel_html(profile: dict) -> str:
     return "".join(parts)
 
 
-XP_SCATTER_BAND_METRICS: dict[str, tuple[str, str, str]] = {
-    "all": ("xp_m4_per_pass", "xp_m4_total", "passes_completed"),
-    "short": ("xp_m4_per_pass_short", "xp_m4_total_short", "passes_short"),
-    "medium": ("xp_m4_per_pass_medium", "xp_m4_total_medium", "passes_medium"),
-    "long": ("xp_m4_per_pass_long", "xp_m4_total_long", "passes_long"),
-}
-
-
-def _xp_scatter_distance_label(distance_band: str) -> str:
-    if distance_band == "all":
-        return "Total"
-    return xe.BAND_LABELS.get(distance_band, distance_band)
-
-
-def _xp_scatter_pool_players(
+def _scatter_pool_players(
     all_players: list[dict],
     progression_by_id: dict[str, dict],
     *,
     xp_by_id: dict[str, dict] | None,
     position_codes: frozenset[str],
     position_groups: frozenset[str],
-    passes_col: str,
 ) -> tuple[list[dict], dict[str, float]]:
+    passes_col = "passes_completed"
     xp_profiles = list((xp_by_id or {}).values())
     thresholds = xstats.p20_pass_thresholds_by_group(xp_profiles, passes_col)
 
@@ -5745,12 +5753,13 @@ def _xp_scatter_pool_players(
     return rows, thresholds
 
 
-def build_xp_per_pass_total_scatter_figure(
+def build_stats_scatter_figure(
     players: list[dict],
     *,
-    per_pass_key: str,
-    total_key: str,
-    distance_label: str,
+    x_key: str,
+    y_key: str,
+    x_label: str,
+    y_label: str,
     position_label: str,
     highlight_player_id: str | None = None,
 ):
@@ -5761,8 +5770,8 @@ def build_xp_per_pass_total_scatter_figure(
     points: list[dict[str, object]] = []
     for row in players:
         try:
-            x_val = float(row.get(per_pass_key))
-            y_val = float(row.get(total_key))
+            x_val = float(row.get(x_key))
+            y_val = float(row.get(y_key))
         except (TypeError, ValueError):
             continue
         if not (math.isfinite(x_val) and math.isfinite(y_val)):
@@ -5774,6 +5783,8 @@ def build_xp_per_pass_total_scatter_figure(
             "team": str(row.get("team", "—")),
             "position": str(row.get("position", "—")),
             "player_id": str(row.get("player_id", "")),
+            "x_fmt": xstats.format_stats_value(x_key, x_val),
+            "y_fmt": xstats.format_stats_value(y_key, y_val),
         })
 
     fig = go.Figure()
@@ -5781,6 +5792,14 @@ def build_xp_per_pass_total_scatter_figure(
 
     regular = [p for p in points if p["player_id"] != str(highlight_player_id or "")]
     highlighted = [p for p in points if p["player_id"] == str(highlight_player_id or "")]
+
+    hover_template = (
+        "<b>%{text}</b><br>"
+        f"{x_label}: %{{customdata[2]}}<br>"
+        f"{y_label}: %{{customdata[3]}}<br>"
+        "%{customdata[0]} · %{customdata[1]}"
+        "<extra></extra>"
+    )
 
     if regular:
         fig.add_trace(
@@ -5795,14 +5814,10 @@ def build_xp_per_pass_total_scatter_figure(
                     line=dict(width=0.8, color="#1e3a5f"),
                 ),
                 text=[p["name"] for p in regular],
-                customdata=[[p["team"], p["position"]] for p in regular],
-                hovertemplate=(
-                    "<b>%{text}</b><br>"
-                    "xP/Passe: %{x:.3f}<br>"
-                    "xP Total: %{y:.1f}<br>"
-                    "%{customdata[0]} · %{customdata[1]}"
-                    "<extra></extra>"
-                ),
+                customdata=[
+                    [p["team"], p["position"], p["x_fmt"], p["y_fmt"]] for p in regular
+                ],
+                hovertemplate=hover_template,
             )
         )
 
@@ -5819,14 +5834,10 @@ def build_xp_per_pass_total_scatter_figure(
                     line=dict(width=1.4, color="#f8fafc"),
                 ),
                 text=[p["name"] for p in highlighted],
-                customdata=[[p["team"], p["position"]] for p in highlighted],
-                hovertemplate=(
-                    "<b>%{text}</b><br>"
-                    "xP/Passe: %{x:.3f}<br>"
-                    "xP Total: %{y:.1f}<br>"
-                    "%{customdata[0]} · %{customdata[1]}"
-                    "<extra></extra>"
-                ),
+                customdata=[
+                    [p["team"], p["position"], p["x_fmt"], p["y_fmt"]] for p in highlighted
+                ],
+                hovertemplate=hover_template,
             )
         )
 
@@ -5838,12 +5849,12 @@ def build_xp_per_pass_total_scatter_figure(
 
     fig.update_layout(
         title=dict(
-            text=f"xP/Passe vs xP Total · {distance_label} · {position_label}",
+            text=f"{x_label} vs {y_label} · {position_label}",
             font=dict(size=12, color="#f8fafc"),
             x=0.02,
             xanchor="left",
         ),
-        height=320,
+        height=560,
         margin=dict(l=12, r=12, t=42, b=12),
         paper_bgcolor="#0f172a",
         plot_bgcolor="#0f172a",
@@ -5856,7 +5867,7 @@ def build_xp_per_pass_total_scatter_figure(
         showlegend=False,
         hovermode="closest",
         xaxis=dict(
-            title=dict(text="xP/Passe", font=dict(size=10, color="#94a3b8")),
+            title=dict(text=x_label, font=dict(size=10, color="#94a3b8")),
             color="#94a3b8",
             showgrid=False,
             zeroline=False,
@@ -5864,7 +5875,7 @@ def build_xp_per_pass_total_scatter_figure(
             tickfont=dict(size=10, color="#94a3b8"),
         ),
         yaxis=dict(
-            title=dict(text="xP Total", font=dict(size=10, color="#94a3b8")),
+            title=dict(text=y_label, font=dict(size=10, color="#94a3b8")),
             color="#94a3b8",
             showgrid=False,
             zeroline=False,
@@ -5875,69 +5886,124 @@ def build_xp_per_pass_total_scatter_figure(
     return fig
 
 
-draw_xp_per_pass_total_scatter = build_xp_per_pass_total_scatter_figure
-
-
-def _selected_position_blocks_label(state_key: str) -> str:
+def _selected_position_blocks_label(
+    state_key: str,
+    blocks: tuple[tuple[str, str, frozenset[str] | None, str | None], ...] = PLAYER_ANALYSIS_POSITION_BLOCKS,
+) -> str:
     selected = st.session_state.get(state_key) or set()
     labels = [
         label
-        for block_id, label, _codes, _rating_group in PLAYER_ANALYSIS_POSITION_BLOCKS
+        for block_id, label, _codes, _rating_group in blocks
         if block_id in selected
     ]
     return ", ".join(labels) if labels else "—"
 
 
-def _render_xp_scatter_panel(
+def _scatter_default_metric_index(metric_keys: list[str], preferred: str) -> int:
+    try:
+        return metric_keys.index(preferred)
+    except ValueError:
+        return 0
+
+
+def render_scatter_section(
     all_players: list[dict],
     progression_by_id: dict[str, dict],
     *,
-    xp_by_id: dict[str, dict] | None,
-    highlight_player_id: str | None = None,
+    xp_by_id: dict[str, dict] | None = None,
 ) -> None:
-    st.markdown("### Dispersão xP/Passe × xP Total")
-    filter_col, dist_col = st.columns([2.1, 1], gap="medium")
-    with filter_col:
-        with st.container(key="stats_scatter_position_blocks"):
-            position_codes, position_groups = _render_position_block_slicer(
-                key_prefix="stats_scatter",
-                state_key=STATS_SCATTER_POSITION_BLOCKS_KEY,
-            )
-    with dist_col:
-        distance_band = st.selectbox(
-            "Distância",
-            options=["all", *xe.BANDS],
-            format_func=_xp_scatter_distance_label,
-            key=STATS_XP_SCATTER_DISTANCE_KEY,
+    st.subheader("Dispersão — Stats xP")
+
+    if not all_players:
+        st.info("No players available.")
+        return
+
+    with st.container(key="scatter_position_blocks"):
+        position_codes, position_groups = _render_position_block_slicer(
+            key_prefix="scatter",
+            state_key=SCATTER_POSITION_BLOCKS_KEY,
+            blocks=SCATTER_POSITION_BLOCKS,
+            block_map=SCATTER_POSITION_BLOCK_BY_ID,
         )
 
     if not position_codes and not position_groups:
         st.info("Selecione uma posição para ver o gráfico.")
         return
 
-    per_pass_key, total_key, passes_col = XP_SCATTER_BAND_METRICS[distance_band]
-    pool, thresholds = _xp_scatter_pool_players(
+    metric_options = xstats.iter_stats_metric_options()
+    metric_keys = [key for key, _label in metric_options]
+    metric_labels = {key: label for key, label in metric_options}
+
+    metric_col, player_col = st.columns([2.1, 1], gap="medium")
+    with metric_col:
+        axis_x_col, axis_y_col = st.columns(2, gap="small")
+        with axis_x_col:
+            x_key = st.selectbox(
+                "Eixo X",
+                options=metric_keys,
+                format_func=lambda key: metric_labels[key],
+                index=_scatter_default_metric_index(metric_keys, "xp_m4_per_pass"),
+                key=SCATTER_X_METRIC_KEY,
+            )
+        with axis_y_col:
+            y_key = st.selectbox(
+                "Eixo Y",
+                options=metric_keys,
+                format_func=lambda key: metric_labels[key],
+                index=_scatter_default_metric_index(metric_keys, "xp_m4_total"),
+                key=SCATTER_Y_METRIC_KEY,
+            )
+
+    highlight_player_id: str | None = None
+    with player_col:
+        player_options = _player_analysis_options(
+            all_players,
+            progression_by_id,
+            position_codes=position_codes,
+            position_groups=position_groups,
+            xp_by_id=xp_by_id,
+        )
+        if player_options:
+            labels = [option[3] for option in player_options]
+            id_by_label = {option[3]: option[0] for option in player_options}
+            selected_label = st.selectbox(
+                "Jogador",
+                options=labels,
+                key=SCATTER_HIGHLIGHT_PLAYER_KEY,
+                placeholder="Selecione para destacar",
+            )
+            if selected_label:
+                highlight_player_id = id_by_label[selected_label]
+        else:
+            st.info("Nenhum jogador disponível para os filtros selecionados.")
+
+    pool, thresholds = _scatter_pool_players(
         all_players,
         progression_by_id,
         xp_by_id=xp_by_id,
         position_codes=position_codes,
         position_groups=position_groups,
-        passes_col=passes_col,
     )
     if not pool:
         st.info(
             f"Nenhum jogador elegível (passes ≥ P{xstats.DISTANCE_INDEX_MIN_PASS_PERCENTILE} "
-            f"da posição para {_xp_scatter_distance_label(distance_band).lower()})."
+            "da posição)."
         )
         return
 
-    position_label = _selected_position_blocks_label(STATS_SCATTER_POSITION_BLOCKS_KEY)
+    position_label = _selected_position_blocks_label(
+        SCATTER_POSITION_BLOCKS_KEY,
+        blocks=SCATTER_POSITION_BLOCKS,
+    )
+    x_label = metric_labels[x_key]
+    y_label = metric_labels[y_key]
 
-    fig = build_xp_per_pass_total_scatter_figure(
+    fig = build_stats_scatter_figure(
         pool,
-        per_pass_key=per_pass_key,
-        total_key=total_key,
-        distance_label=_xp_scatter_distance_label(distance_band),
+        x_key=x_key,
+        y_key=y_key,
+        x_label=x_label,
+        y_label=y_label,
         position_label=position_label,
         highlight_player_id=highlight_player_id,
     )
@@ -5951,9 +6017,14 @@ def _render_xp_scatter_panel(
         for group, threshold in sorted(thresholds.items())
         if any(str(row.get("position_group") or "CM") == group for row in pool)
     )
+    highlight_hint = (
+        " · destaque = jogador selecionado acima"
+        if highlight_player_id
+        else ""
+    )
     st.caption(
         f"{len(pool)} jogadores elegíveis · mínimo P{xstats.DISTANCE_INDEX_MIN_PASS_PERCENTILE} "
-        f"({min_passes_hint or '—'}) · destaque = jogador selecionado acima"
+        f"({min_passes_hint or '—'}){highlight_hint}"
     )
 
 
@@ -5998,12 +6069,6 @@ def render_stats_section(
     )
     st.html(_build_stats_panel_html(profile), width="stretch")
     st.markdown("</div>", unsafe_allow_html=True)
-    _render_xp_scatter_panel(
-        all_players,
-        progression_by_id,
-        xp_by_id=xp_by_id,
-        highlight_player_id=str(player_id),
-    )
 
 
 def render_maps_section(
@@ -7226,8 +7291,8 @@ def main() -> None:
             xp_passes_by_player = load_xp_passes()
         xp_by_id = {str(p["player_id"]): p for p in xp_players}
 
-    tab_pres, tab_stats, tab_analysis, tab_maps = st.tabs(
-        ["Overview", "Stats", "Player Analysis", "Maps"]
+    tab_pres, tab_stats, tab_scatter, tab_analysis, tab_maps = st.tabs(
+        ["Overview", "Stats", "Dispersão", "Player Analysis", "Maps"]
     )
     with tab_pres:
         render_presentation_tab(
@@ -7240,6 +7305,12 @@ def main() -> None:
         )
     with tab_stats:
         render_stats_section(
+            all_players,
+            progression_by_id,
+            xp_by_id=xp_by_id,
+        )
+    with tab_scatter:
+        render_scatter_section(
             all_players,
             progression_by_id,
             xp_by_id=xp_by_id,

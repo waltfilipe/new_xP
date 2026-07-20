@@ -468,6 +468,16 @@ XP_STATS_LABELS: dict[str, str] = {
     "xp_pass_std": "Desvio xP (passes)",
 }
 
+def iter_stats_metric_options() -> tuple[tuple[str, str], ...]:
+    """Ordered (metric_key, label) pairs for every Stats tab metric."""
+    seen: dict[str, str] = {}
+    for _title, keys in iter_xp_stats_sections():
+        for key in keys:
+            if key not in seen:
+                seen[key] = stats_metric_label(key)
+    return tuple(seen.items())
+
+
 XP_STATS_RANK_METRICS: tuple[str, ...] = tuple(
     dict.fromkeys(
         key
