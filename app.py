@@ -142,6 +142,7 @@ xe = _load_xp_engine()
 xstats = _load_xp_stats_engine()
 from xp_study_maps import (
     CMAP_XP_GRAY_RED as _CMAP_XP_GRAY_RED,
+    draw_passes_destination_heatmap,
     draw_special_passes_season_map,
     draw_top_xp_passes_map,
     draw_xp_destination_surface,
@@ -1117,47 +1118,37 @@ def _progression_compare_stats_html(
     return "".join(rows)
 
 
-def _xp_compare_display_value(xp_profile: dict, key: str) -> str:
-    if key == "xp_pass_rating":
-        return fmt_rating_score(xp_profile.get(key))
-    if key in xstats.XP_PROFILE_BAR_KEYS:
-        val = xp_profile.get(key)
-        if val is None:
-            return "—"
-        return f"{float(val):.1f}"
-    return _xp_stat_display(xp_profile, key)
+def _xp_compare_profile_value(source: dict, key: str) -> tuple[str, float | None]:
+    val = source.get(key)
+    if val is None:
+        return "—", None
+    num = float(val)
+    return f"{num:.1f}", num
 
 
-def _xp_compare_numeric_value(xp_profile: dict, key: str) -> float | None:
-    if key == "xp_pass_rating":
-        val = xp_profile.get(key)
-        if val is None:
-            return None
-        return float(val) * 10.0
+def _xp_compare_metric_display(source: dict, key: str) -> str:
     if key in xstats.XP_PROFILE_BAR_KEYS:
-        val = xp_profile.get(key)
-        if val is None:
-            return None
+        return _xp_compare_profile_value(source, key)[0]
+    return xstats.format_pa_stats_value(key, source.get(key))
+
+
+def _xp_compare_metric_numeric(source: dict, key: str) -> float | None:
+    val = source.get(key)
+    if val is None:
+        return None
+    try:
         return float(val)
-    return _xp_stat_numeric_value(xp_profile, key)
-
-
-def _xp_compare_metric_label(key: str) -> str:
-    if key in xstats.XP_COMPARE_EXTRA_LABELS:
-        return xstats.XP_COMPARE_EXTRA_LABELS[key]
-    if key in xstats.XP_PROFILE_BAR_KEYS:
-        return xstats.XP_PROFILE_BAR_LABELS[key]
-    return xstats.pa_stats_metric_label(key)
+    except (TypeError, ValueError):
+        return None
 
 
 def _xp_compare_mini_bar_html(score: float | None) -> str:
     if score is None:
         return ""
-    pct = max(0.0, min(100.0, (float(score) - 3.0) / 6.0 * 100.0))
+    pct = max(6.0, min(100.0, (float(score) - 3.0) / 6.0 * 100.0))
     color = score_display_color(float(score))
-    tier = "hot" if pct >= 72.0 else "warm" if pct >= 45.0 else "cool"
     return (
-        f'<span class="pa-xp-compare-mini-bar pa-xp-compare-mini-bar-{tier}">'
+        '<span class="pa-xp-compare-mini-bar">'
         f'<span class="pa-xp-compare-mini-bar-fill" style="width:{pct:.0f}%;background:{color}"></span>'
         "</span>"
     )
@@ -1166,68 +1157,64 @@ def _xp_compare_mini_bar_html(score: float | None) -> str:
 def _xp_compare_value_cell_html(
     value: str,
     *,
-    delta_html: str = "",
-    rank_html: str = "",
+    arrow_html: str = "",
     mini_bar_html: str = "",
 ) -> str:
     bar_block = f'<span class="pa-xp-compare-mini-bar-wrap">{mini_bar_html}</span>' if mini_bar_html else ""
     return (
-        "<span>"
-        f'<span class="cmp-value-wrap pa-xp-compare-value-wrap">'
-        f'<span class="cmp-cell-value">{value}</span>{delta_html}'
+        '<span class="pa-xp-compare-cell">'
+        f'<span class="cmp-value-wrap"><span class="cmp-cell-value">{value}</span>{arrow_html}</span>'
         f"{bar_block}"
-        "</span>"
-        f'{rank_html if rank_html else ""}'
         "</span>"
     )
 
 
-def _xp_compare_rank_html(rank_n: int | float | None, position_group: str | None) -> str:
-    if not rank_n:
-        return ""
+def _xp_compare_profile_row_html(
+    label: str,
+    primary: dict,
+    secondary: dict,
+    key: str,
+) -> str:
+    p_val, p_num = _xp_compare_profile_value(primary, key)
+    s_val, s_num = _xp_compare_profile_value(secondary, key)
+    arrow = _cmp_delta_compare_html(p_num, s_num)
+    p_bar = _xp_compare_mini_bar_html(p_num)
+    s_bar = _xp_compare_mini_bar_html(s_num)
     return (
-        f'<span class="cmp-rank-note">{html.escape(_xp_rank_in_group_label(int(rank_n), position_group))}</span>'
+        '<div class="cmp-row cmp-row-primary">'
+        f'<span class="cmp-cell-label cmp-cell-label-strong">{html.escape(label)}</span>'
+        f"{_xp_compare_value_cell_html(html.escape(p_val), mini_bar_html=p_bar)}"
+        f"{_xp_compare_value_cell_html(html.escape(s_val), arrow_html=arrow, mini_bar_html=s_bar)}"
+        "</div>"
     )
 
 
 def _xp_compare_metric_row_html(
     label: str,
-    primary_xp: dict,
-    secondary_xp: dict,
+    primary: dict,
+    secondary: dict,
     key: str,
-    *,
-    primary_group: str | None,
-    secondary_group: str | None,
-    row_class: str = "",
-    show_mini_bar: bool = False,
 ) -> str:
-    p_val = html.escape(_xp_compare_display_value(primary_xp, key))
-    s_val = html.escape(_xp_compare_display_value(secondary_xp, key))
-    p_num = _xp_compare_numeric_value(primary_xp, key)
-    s_num = _xp_compare_numeric_value(secondary_xp, key)
-    s_delta = _cmp_stat_pct_delta_html(s_num, p_num)
-    p_rank = _xp_compare_rank_html(primary_xp.get(f"{key}_rank_in_group"), primary_group)
-    s_rank = _xp_compare_rank_html(secondary_xp.get(f"{key}_rank_in_group"), secondary_group)
-    p_bar = _xp_compare_mini_bar_html(p_num) if show_mini_bar else ""
-    s_bar = _xp_compare_mini_bar_html(s_num) if show_mini_bar else ""
-    row_cls = f"cmp-row {row_class}".strip()
+    p_val = html.escape(_xp_compare_metric_display(primary, key))
+    s_val = html.escape(_xp_compare_metric_display(secondary, key))
+    p_num = _xp_compare_metric_numeric(primary, key)
+    s_num = _xp_compare_metric_numeric(secondary, key)
+    arrow = _cmp_delta_compare_html(p_num, s_num)
     return (
-        f'<div class="{row_cls}">'
+        '<div class="cmp-row cmp-row-secondary">'
         f'<span class="cmp-cell-label">{html.escape(label)}</span>'
-        f"{_xp_compare_value_cell_html(p_val, rank_html=p_rank, mini_bar_html=p_bar)}"
-        f"{_xp_compare_value_cell_html(s_val, delta_html=s_delta, rank_html=s_rank, mini_bar_html=s_bar)}"
+        f"{_xp_compare_value_cell_html(p_val)}"
+        f"{_xp_compare_value_cell_html(s_val, arrow_html=arrow)}"
         "</div>"
     )
 
 
 def _xp_compare_stats_html(
-    primary_xp: dict,
-    secondary_xp: dict,
+    primary: dict,
+    secondary: dict,
     *,
     primary_name: str,
     secondary_name: str,
-    primary_group: str | None = None,
-    secondary_group: str | None = None,
 ) -> str:
     primary_name = html.escape(str(primary_name or "Player A"))
     secondary_name = html.escape(str(secondary_name or "Player B"))
@@ -1239,60 +1226,34 @@ def _xp_compare_stats_html(
         "</div>",
         '<div class="cmp-row cmp-row-head">',
         "<span>Dimensão</span>",
-        f"<span>{primary_name}</span>",
-        f"<span>{secondary_name}</span>",
+        f'<span>{primary_name}</span>',
+        f'<span>{secondary_name}</span>',
         "</div>",
-        '<div class="cmp-row cmp-row-section">',
-        '<span class="cmp-cell-label cmp-section-label">Visão geral</span>',
-        "<span></span>",
-        "<span></span>",
-        "</div>",
+        '<div class="pa-xp-compare-group pa-xp-compare-group-primary">',
+        '<div class="pa-xp-compare-group-title">Perfil de impacto</div>',
     ]
-    for key in xstats.XP_COMPARE_EXTRA_METRICS:
+    for key in xstats.XP_COMPARE_PROFILE_KEYS:
         rows.append(
-            _xp_compare_metric_row_html(
-                _xp_compare_metric_label(key),
-                primary_xp,
-                secondary_xp,
+            _xp_compare_profile_row_html(
+                xstats.XP_PROFILE_BAR_LABELS.get(key, key),
+                primary,
+                secondary,
                 key,
-                primary_group=primary_group,
-                secondary_group=secondary_group,
-                row_class="cmp-row-metric",
             )
         )
-
-    for bar_key in xstats.XP_PROFILE_BAR_KEYS:
-        section_label = xstats.XP_PROFILE_BAR_LABELS.get(bar_key, bar_key)
-        rows.extend([
-            '<div class="cmp-row cmp-row-section cmp-row-bar-section">',
-            f'<span class="cmp-cell-label cmp-section-label">{html.escape(section_label)}</span>',
-            "<span></span>",
-            "<span></span>",
-            "</div>",
+    rows.append("</div>")
+    rows.append('<div class="pa-xp-compare-group pa-xp-compare-group-secondary">')
+    rows.append('<div class="pa-xp-compare-group-title">Métricas-chave</div>')
+    for key in xstats.XP_COMPARE_METRIC_KEYS:
+        rows.append(
             _xp_compare_metric_row_html(
-                "Nota do perfil",
-                primary_xp,
-                secondary_xp,
-                bar_key,
-                primary_group=primary_group,
-                secondary_group=secondary_group,
-                row_class="cmp-row-bar-main",
-                show_mini_bar=True,
-            ),
-        ])
-        for metric_key in xstats.XP_PROFILE_BAR_METRICS.get(bar_key, ()):
-            rows.append(
-                _xp_compare_metric_row_html(
-                    xstats.pa_stats_metric_label(metric_key),
-                    primary_xp,
-                    secondary_xp,
-                    metric_key,
-                    primary_group=primary_group,
-                    secondary_group=secondary_group,
-                    row_class="cmp-row-sub",
-                )
+                xstats.XP_COMPARE_METRIC_LABELS.get(key, key),
+                primary,
+                secondary,
+                key,
             )
-
+        )
+    rows.append("</div>")
     rows.append("</div>")
     return "".join(rows)
 
@@ -1325,7 +1286,6 @@ def _render_xp_comparison_panel(
         st.info(f"Nenhum outro jogador disponível no grupo {pool_label} para comparação.")
         return
 
-    st.markdown("### Comparar")
     st.caption(f"Mesmo grupo de posição: {pool_label}.")
 
     labels = [o[3] for o in options]
@@ -1341,7 +1301,7 @@ def _render_xp_comparison_panel(
         placeholder="Selecione outro jogador",
     )
     if not compare_label:
-        st.info("Selecione um segundo jogador para comparar as métricas xP.")
+        st.info("Selecione um segundo jogador para comparar.")
         return
 
     compare_id = id_by_label[compare_label]
@@ -1351,14 +1311,14 @@ def _render_xp_comparison_panel(
         return
 
     compare_player = progression_by_id.get(compare_id, {})
+    primary_source = {**primary, **primary_xp}
+    secondary_source = {**compare_player, **compare_xp}
     st.html(
         _xp_compare_stats_html(
-            primary_xp,
-            compare_xp,
+            primary_source,
+            secondary_source,
             primary_name=str(primary.get("player_name", "—")),
             secondary_name=str(compare_player.get("player_name", compare_xp.get("player_name", "—"))),
-            primary_group=str(primary.get("position_group") or ""),
-            secondary_group=str(compare_player.get("position_group") or compare_xp.get("position_group") or ""),
         ),
         width="stretch",
     )
@@ -1972,6 +1932,59 @@ st.markdown(
         letter-spacing: 0.09em;
         text-transform: uppercase;
     }
+    .pres-xp-examples {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.7rem;
+        margin-bottom: 0.7rem;
+    }
+    @media (max-width: 900px) {
+        .pres-xp-examples { grid-template-columns: 1fr; }
+    }
+    .pres-xp-example {
+        position: relative;
+        background: linear-gradient(160deg, #151b2b 0%, #101522 100%);
+        border: 1px solid #2a3550;
+        border-left-width: 3px;
+        border-radius: 12px;
+        padding: 0.9rem 0.95rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+    }
+    .pres-xp-example h5 {
+        margin: 0.1rem 0 0;
+        color: #f1f5f9;
+        font-size: 0.92rem;
+        font-weight: 700;
+    }
+    .pres-xp-example p {
+        margin: 0;
+        color: #94a3b8;
+        font-size: 0.8rem;
+        line-height: 1.45;
+    }
+    .pres-xp-tag {
+        align-self: flex-start;
+        font-size: 0.66rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        padding: 0.14rem 0.5rem;
+        border-radius: 999px;
+    }
+    .pres-xp-low { border-left-color: #6b7280; }
+    .pres-xp-low .pres-xp-tag { background: rgba(107,114,128,0.18); color: #cbd5e1; }
+    .pres-xp-mid { border-left-color: #f59e0b; }
+    .pres-xp-mid .pres-xp-tag { background: rgba(245,158,11,0.16); color: #fcd34d; }
+    .pres-xp-high { border-left-color: #ef4444; }
+    .pres-xp-high .pres-xp-tag { background: rgba(239,68,68,0.18); color: #fca5a5; }
+    .pres-xp-note {
+        padding: 0.8rem 1.05rem;
+        margin-bottom: 0.85rem;
+        border-left: 3px solid #60a5fa;
+    }
+    .pres-xp-note p { margin: 0; color: #cbd5e1; font-size: 0.86rem; line-height: 1.5; }
     .pres-feature-card {
         background: linear-gradient(160deg, #151b2b 0%, #101522 100%);
         border: 1px solid #2a3550;
@@ -2384,8 +2397,68 @@ st.markdown(
     .cmp-delta.down { color: #f87171; }
     .cmp-delta.flat { color: #475569; }
     .cmp-value-wrap { display: inline-flex; align-items: center; }
+    .st-key-pa_subtabs div[data-baseweb="tab-list"] {
+        gap: 0.5rem;
+        background: transparent;
+        border-bottom: 1px solid #243049;
+        margin-bottom: 0.85rem;
+    }
+    .st-key-pa_subtabs button[data-baseweb="tab"] {
+        border-radius: 10px 10px 0 0;
+        padding: 0.35rem 0.4rem;
+        background: transparent;
+    }
+    .st-key-pa_subtabs button[data-baseweb="tab"] [data-testid="stMarkdownContainer"] p {
+        font-size: 0.98rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        color: #64748b;
+        text-transform: uppercase;
+    }
+    .st-key-pa_subtabs button[data-baseweb="tab"][aria-selected="true"] [data-testid="stMarkdownContainer"] p {
+        color: #f8fafc;
+        background: linear-gradient(90deg, #a78bfa, #60a5fa);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .st-key-pa_subtabs div[data-baseweb="tab-highlight"] {
+        background: linear-gradient(90deg, #a78bfa, #60a5fa);
+        height: 3px;
+        border-radius: 3px;
+    }
+    .pa-compare-hero {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        padding: 0.85rem 1.05rem;
+        margin-bottom: 0.9rem;
+        border-radius: 14px;
+        background: linear-gradient(120deg, rgba(167,139,250,0.16), rgba(96,165,250,0.08) 60%, rgba(15,23,42,0.2));
+        border: 1px solid #2e3a57;
+    }
+    .pa-compare-hero-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        background: linear-gradient(145deg, #a78bfa, #60a5fa);
+        color: #0b1120;
+        font-size: 1.05rem;
+        flex-shrink: 0;
+    }
+    .pa-compare-hero-text { display: flex; flex-direction: column; gap: 0.12rem; }
+    .pa-compare-hero-title {
+        font-size: 1.12rem;
+        font-weight: 800;
+        color: #f1f5f9;
+        letter-spacing: 0.01em;
+    }
+    .pa-compare-hero-sub { font-size: 0.82rem; color: #94a3b8; }
     .pa-xp-compare-card {
-        padding: 1rem 1.1rem 0.85rem;
+        padding: 1rem 1.15rem 0.9rem;
     }
     .pa-xp-compare-legend {
         display: flex;
@@ -2399,7 +2472,7 @@ st.markdown(
         display: inline-flex;
         align-items: center;
         gap: 0.45rem;
-        font-size: 0.88rem;
+        font-size: 0.9rem;
         font-weight: 700;
         color: #e2e8f0;
     }
@@ -2412,42 +2485,49 @@ st.markdown(
     }
     .pa-xp-compare-legend-primary::before { background: #a78bfa; }
     .pa-xp-compare-legend-secondary::before { background: #86efac; }
-    .cmp-row-bar-section {
-        background: linear-gradient(90deg, rgba(147, 197, 253, 0.08), transparent 72%);
-        border-radius: 8px;
-        margin-top: 0.35rem;
-        padding-top: 0.5rem;
+    .pa-xp-compare-group { margin-top: 0.7rem; }
+    .pa-xp-compare-group-title {
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #93c5fd;
+        margin-bottom: 0.35rem;
+        padding-bottom: 0.3rem;
+        border-bottom: 1px solid #1f293f;
     }
-    .cmp-row-bar-main {
-        background: rgba(15, 23, 42, 0.45);
-        border-bottom-color: #243049;
+    .pa-xp-compare-group-secondary .pa-xp-compare-group-title { color: #7c8aa5; }
+    .cmp-row-primary {
+        align-items: center;
+        padding: 0.55rem 0.55rem;
+        border-radius: 10px;
+        border-bottom: none;
+        margin-bottom: 0.3rem;
+        background: linear-gradient(90deg, rgba(147,197,253,0.07), rgba(15,23,42,0.0) 78%);
     }
-    .cmp-row-bar-main .cmp-cell-label {
+    .cmp-row-primary .cmp-cell-label-strong {
         color: #f8fafc;
+        font-size: 0.95rem;
         font-weight: 700;
     }
-    .cmp-row-sub .cmp-cell-label {
-        padding-left: 0.85rem;
-        color: #94a3b8;
-        font-size: 0.8rem;
+    .cmp-row-primary .cmp-cell-value { font-size: 1.12rem; }
+    .cmp-row-secondary {
+        align-items: center;
+        padding: 0.34rem 0.55rem;
+        border-bottom: 1px solid #18202f;
     }
-    .cmp-row-sub {
-        padding-top: 0.28rem;
-        padding-bottom: 0.28rem;
-    }
-    .cmp-row-sub .cmp-cell-value {
-        font-size: 0.95rem;
-        font-weight: 600;
-    }
-    .pa-xp-compare-value-wrap {
+    .cmp-row-secondary .cmp-cell-label { color: #94a3b8; font-size: 0.82rem; }
+    .cmp-row-secondary .cmp-cell-value { font-size: 0.98rem; font-weight: 600; color: #e2e8f0; }
+    .pa-xp-compare-cell {
+        display: flex;
         flex-direction: column;
         align-items: flex-start;
-        gap: 0.28rem;
+        gap: 0.3rem;
     }
     .pa-xp-compare-mini-bar-wrap {
         display: block;
         width: 100%;
-        max-width: 120px;
+        max-width: 130px;
     }
     .pa-xp-compare-mini-bar {
         display: block;
@@ -7750,9 +7830,10 @@ def render_maps_section(
         st.info("Nenhum passe completo para este jogador com o filtro selecionado.")
     else:
         work = _maps_passes_table(passes_df)
-        fig = draw_special_passes_season_map(
+        player_name = str(player.get("player_name", "—"))
+        fig_passes = draw_special_passes_season_map(
             work,
-            player_name=str(player.get("player_name", "—")),
+            player_name=player_name,
             season_label=APP_LEAGUE,
             category_label=map_category_label,
             xp_col="xp_m4",
@@ -7760,12 +7841,22 @@ def render_maps_section(
             show_labels=False,
             cmap=_CMAP_XP_GRAY_RED,
         )
-        map_col, _map_spacer = st.columns([3, 2], gap="small")
-        with map_col:
-            st.pyplot(fig, clear_figure=True, use_container_width=True)
-        st.caption(
-            f"{len(work)} passes completos · cor do passe = xP (cinza → vermelho forte)"
+        fig_dest = draw_passes_destination_heatmap(
+            work,
+            player_name=player_name,
+            season_label=APP_LEAGUE,
+            category_label=map_category_label,
+            cmap=_CMAP_XP_GRAY_RED,
         )
+        map_col, dest_col = st.columns(2, gap="small")
+        with map_col:
+            st.pyplot(fig_passes, clear_figure=True, use_container_width=True)
+            st.caption(
+                f"{len(work)} passes completos · cor do passe = xP (cinza → vermelho forte)"
+            )
+        with dest_col:
+            st.pyplot(fig_dest, clear_figure=True, use_container_width=True)
+            st.caption("Heatmap de destino · onde os passes selecionados terminam")
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -8132,30 +8223,43 @@ def render_player_analysis_section(
         )
         origin_heatmap_b64 = _fig_to_b64(fig_origin)
 
-    render_player_analysis_profile(
-        player,
-        xp_profile=xp_profile,
-        scout_section_specs=PROGRESSION_SCOUT_SECTION_SPECS,
-        pillar_labels=_PROGRESSION_RADAR_METRIC_LABELS,
-        origin_heatmap_b64=origin_heatmap_b64,
-        label_fn=pg_analyst_metric_label,
-        tooltip_fn=pg_metric_tooltip,
-        rank_in_group_fn=pg_rank_in_group_label,
-        fmt_pct_fn=pg_fmt_pct,
-        fmt_stat_fn=pg_fmt_stat_value,
-        confidence_minutes=RATING_CONFIDENCE_MINUTES,
-        confidence_passes=RATING_CONFIDENCE_PASSES,
-    )
-
-    if xp_by_id:
-        _render_xp_comparison_panel(
-            player,
-            all_players=all_players,
-            progression_by_id=progression_by_id,
-            xp_by_id=xp_by_id,
-        )
-    else:
-        st.info("Métricas xP indisponíveis para comparação.")
+    with st.container(key="pa_subtabs"):
+        tab_profile, tab_compare = st.tabs(["  Perfil do jogador  ", "  Comparar  "])
+        with tab_profile:
+            render_player_analysis_profile(
+                player,
+                xp_profile=xp_profile,
+                scout_section_specs=PROGRESSION_SCOUT_SECTION_SPECS,
+                pillar_labels=_PROGRESSION_RADAR_METRIC_LABELS,
+                origin_heatmap_b64=origin_heatmap_b64,
+                label_fn=pg_analyst_metric_label,
+                tooltip_fn=pg_metric_tooltip,
+                rank_in_group_fn=pg_rank_in_group_label,
+                fmt_pct_fn=pg_fmt_pct,
+                fmt_stat_fn=pg_fmt_stat_value,
+                confidence_minutes=RATING_CONFIDENCE_MINUTES,
+                confidence_passes=RATING_CONFIDENCE_PASSES,
+            )
+        with tab_compare:
+            st.markdown(
+                '<div class="pa-compare-hero">'
+                '<span class="pa-compare-hero-icon"><i class="fa-solid fa-code-compare"></i></span>'
+                '<span class="pa-compare-hero-text">'
+                '<span class="pa-compare-hero-title">Comparar jogadores</span>'
+                '<span class="pa-compare-hero-sub">Perfil de impacto e métricas-chave lado a lado</span>'
+                "</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            if xp_by_id:
+                _render_xp_comparison_panel(
+                    player,
+                    all_players=all_players,
+                    progression_by_id=progression_by_id,
+                    xp_by_id=xp_by_id,
+                )
+            else:
+                st.info("Métricas xP indisponíveis para comparação.")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -8526,8 +8630,41 @@ def render_presentation_tab(
     st.markdown(
         '<div class="pres-card pres-card-hero">'
         f"<h4>{html.escape(APP_NAME)} · valor esperado do passe (xP)</h4>"
-        "<p>O <strong>xP</strong> mede quanto cada passe aproxima a equipe do gol — "
-        f"sempre comparado aos jogadores da mesma posição na {html.escape(APP_LEAGUE)}.</p>"
+        "<p>O <strong>xP</strong> (<em>expected Pass</em>) responde a uma pergunta simples: "
+        "<strong>quão perigoso é o lugar onde o passe termina?</strong> "
+        "Cada passe completado ganha uma nota conforme a raridade e o valor ofensivo do destino — "
+        "quanto mais raro e mais perto de criar uma chance, maior o xP. "
+        f"As notas são sempre comparadas com jogadores da mesma posição na {html.escape(APP_LEAGUE)}.</p>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<p class="pres-section-label">xP na prática — 3 exemplos</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="pres-xp-examples">'
+        '<div class="pres-xp-example pres-xp-low">'
+        '<span class="pres-xp-tag">xP baixo</span>'
+        "<h5>Recuo lateral no meio-campo</h5>"
+        "<p>Passe curto e seguro para o lado, longe da meta. É comum e quase sempre completado, "
+        "então agrega pouco valor ofensivo.</p></div>"
+        '<div class="pres-xp-example pres-xp-mid">'
+        '<span class="pres-xp-tag">xP médio</span>'
+        "<h5>Inversão de jogo de 40m</h5>"
+        "<p>Troca o lado do ataque e encontra o espaço livre. Difícil de executar e muda a "
+        "estrutura da defesa, mas ainda não é a bola do gol.</p></div>"
+        '<div class="pres-xp-example pres-xp-high">'
+        '<span class="pres-xp-tag">xP alto</span>'
+        "<h5>Passe que quebra a linha para a área</h5>"
+        "<p>Rompe a última linha e deixa o companheiro cara a cara com o gol. Raro, arriscado "
+        "e diretamente ligado a criar chances — o tipo de passe mais valioso.</p></div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="pres-card pres-xp-note">'
+        "<p><strong>Por que somar isso ao longo da temporada?</strong> Um jogador pode completar "
+        "muitos passes e ainda gerar pouco xP (jogo lateral). Outro arrisca menos passes, mas "
+        "cada um vale muito. O xP separa <em>quem move a bola</em> de <em>quem cria perigo</em>.</p>"
         "</div>",
         unsafe_allow_html=True,
     )

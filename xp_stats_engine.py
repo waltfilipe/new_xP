@@ -554,19 +554,26 @@ XP_PROFILE_BAR_METRICS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# Player Analysis compare panel — profile bars plus headline xP metrics.
-XP_COMPARE_EXTRA_METRICS: tuple[str, ...] = (
-    "xp_pass_rating",
-    "xp_m4_total",
-    "xp_per_90",
-    "xp_m4_threat_rate",
+# Player Analysis compare panel.
+# Primary dimensions (more emphasis) = the four profile bars.
+XP_COMPARE_PROFILE_KEYS: tuple[str, ...] = (
+    "xp_activity_display",
+    "xp_edge_display",
+    "xp_quality_display",
+    "xp_consistency_display",
 )
-
-XP_COMPARE_EXTRA_LABELS: dict[str, str] = {
-    "xp_pass_rating": "Pass Rating",
-    "xp_m4_total": "xP total",
-    "xp_per_90": "xP / jogo",
-    "xp_m4_threat_rate": "% threats",
+# Secondary metrics (less emphasis) = headline xP + progression stats.
+XP_COMPARE_METRIC_KEYS: tuple[str, ...] = (
+    "xp_per_90",
+    "xp_m4_per_pass",
+    "progressive_passes",
+    "final_third_passes",
+)
+XP_COMPARE_METRIC_LABELS: dict[str, str] = {
+    "xp_per_90": "xP (Por jogo)",
+    "xp_m4_per_pass": "xP/Passe",
+    "progressive_passes": "Progressivos",
+    "final_third_passes": "Terço Final",
 }
 
 XP_PROFILE_BAR_TOOLTIPS: dict[str, str] = {

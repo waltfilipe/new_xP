@@ -348,6 +348,79 @@ def draw_special_passes_season_map(
     return fig
 
 
+def draw_passes_destination_heatmap(
+    passes,
+    *,
+    player_name: str,
+    season_label: str = "temporada",
+    category_label: str = "Special pass",
+    cols: int = 12,
+    rows: int = 8,
+    cmap=CMAP_XP_GRAY_RED,
+):
+    """Heatmap of pass destination cells for the currently filtered passes."""
+    fig, ax, pitch = _base_pitch()
+
+    if passes is None or passes.empty or "x_end" not in passes.columns:
+        ax.text(
+            60, 40, "Sem passes para este filtro",
+            ha="center", va="center", color="white", fontsize=10,
+        )
+        ax.set_title(
+            f"{player_name}\nDestino · {category_label} · {season_label}",
+            color="white", fontsize=10, pad=8,
+        )
+        return fig
+
+    work = passes.dropna(subset=["x_end", "y_end"]).copy()
+    x_bins = np.linspace(0.0, FIELD_X, cols + 1)
+    y_bins = np.linspace(0.0, FIELD_Y, rows + 1)
+    grid = np.zeros((rows, cols), dtype=float)
+    if not work.empty:
+        x_idx = np.clip(
+            np.digitize(work["x_end"].to_numpy(dtype=float), x_bins, right=True) - 1,
+            0, cols - 1,
+        )
+        y_idx = np.clip(
+            np.digitize(work["y_end"].to_numpy(dtype=float), y_bins, right=True) - 1,
+            0, rows - 1,
+        )
+        for ix, iy in zip(x_idx, y_idx):
+            grid[iy, ix] += 1.0
+
+    vmax = max(float(grid.max()), 1.0)
+    norm = Normalize(vmin=0.0, vmax=vmax)
+    for iy in range(rows):
+        for ix in range(cols):
+            value = float(grid[iy, ix])
+            if value <= 0:
+                continue
+            ax.add_patch(
+                Rectangle(
+                    (x_bins[ix], y_bins[iy]),
+                    x_bins[ix + 1] - x_bins[ix],
+                    y_bins[iy + 1] - y_bins[iy],
+                    facecolor=cmap(norm(value)),
+                    edgecolor=(1, 1, 1, 0.10),
+                    linewidth=0.3,
+                    alpha=0.9,
+                    zorder=2,
+                )
+            )
+
+    sm = ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.02)
+    cbar.set_label("Passes no destino", color="white", fontsize=8)
+    cbar.ax.yaxis.set_tick_params(color="white", labelcolor="white")
+
+    ax.set_title(
+        f"{player_name}\nDestino dos passes · {category_label} · {season_label}",
+        color="white", fontsize=10, pad=8,
+    )
+    return fig
+
+
 def draw_xp_threat_passes_season_map(
     passes,
     *,
