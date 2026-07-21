@@ -3476,6 +3476,51 @@ st.markdown(
     .pa-xp-section-body .metric-line:last-child {
         border-bottom: none;
     }
+    .pa-top-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.28rem;
+        padding: 0.12rem 0.46rem;
+        border-radius: 999px;
+        font-size: 0.62rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        line-height: 1;
+        white-space: nowrap;
+    }
+    .pa-top-badge i {
+        font-size: 0.6rem;
+    }
+    .pa-top-badge-5 {
+        color: #422006;
+        background: linear-gradient(135deg, #fde68a 0%, #f59e0b 100%);
+        border: 1px solid rgba(251, 191, 36, 0.65);
+        box-shadow: 0 1px 6px rgba(245, 158, 11, 0.35);
+    }
+    .pa-top-badge-10 {
+        color: #dbeafe;
+        background: rgba(59, 130, 246, 0.18);
+        border: 1px solid rgba(96, 165, 250, 0.55);
+    }
+    .special-stat-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        margin-top: 0.35rem;
+        padding: 0.22rem 0.55rem;
+        border-radius: 8px;
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        color: #e9d5ff;
+        background: linear-gradient(135deg, rgba(124, 58, 237, 0.22) 0%, rgba(139, 92, 246, 0.14) 100%);
+        border: 1px solid rgba(167, 139, 250, 0.5);
+        box-shadow: 0 1px 6px rgba(124, 58, 237, 0.18);
+    }
+    .special-stat-tag i {
+        font-size: 0.66rem;
+        opacity: 0.9;
+    }
     .pa-pillars-stack .grade-accordion {
         margin-bottom: 0;
     }
@@ -5808,16 +5853,22 @@ XP_PA_REGULAR_STAT_KEYS: tuple[str, ...] = (
     "long_balls",
     "long_ball_completion_pct",
     "progressive_passes",
-    "progressive_pass_pct",
+    "final_third_passes",
+    "passes_to_box",
+    "key_passes",
+    "pass_mean_distance",
 )
 
 XP_PA_REGULAR_STAT_LABELS: dict[str, str] = {
-    "passes_total": "Passes (por jogo)",
+    "passes_total": "Passes / jogo",
     "pass_completion_pct": "% Passes certos",
-    "long_balls": "Passes longos (por jogo)",
-    "long_ball_completion_pct": "% Passes longos",
-    "progressive_passes": "Passes progressivos (por jogo)",
-    "progressive_pass_pct": "% Passes progressivos",
+    "long_balls": "Passes longos / jogo",
+    "long_ball_completion_pct": "% Passes longos certos",
+    "progressive_passes": "Passes progressivos / jogo",
+    "final_third_passes": "Passes para terço final / jogo",
+    "passes_to_box": "Passes para área / jogo",
+    "key_passes": "Key passes / jogo",
+    "pass_mean_distance": "Distância média do passe",
 }
 
 XP_PA_REGULAR_STAT_TOOLTIPS: dict[str, str] = {
@@ -5826,7 +5877,10 @@ XP_PA_REGULAR_STAT_TOOLTIPS: dict[str, str] = {
     "long_balls": "Passes longos (≥30 m) por 90 minutos.",
     "long_ball_completion_pct": "Percentual de passes longos completados.",
     "progressive_passes": "Passes progressivos bem-sucedidos por 90 minutos.",
-    "progressive_pass_pct": "Percentual dos passes completados que avançam a jogada.",
+    "final_third_passes": "Passes completados para o terço final por 90 minutos.",
+    "passes_to_box": "Passes completados para a área por 90 minutos.",
+    "key_passes": "Passes que geram finalização por 90 minutos.",
+    "pass_mean_distance": "Distância média dos passes completados, em metros.",
 }
 
 XP_PA_REGULAR_STAT_KIND: dict[str, str] = {
@@ -5835,16 +5889,11 @@ XP_PA_REGULAR_STAT_KIND: dict[str, str] = {
     "long_balls": "p90",
     "long_ball_completion_pct": "pct",
     "progressive_passes": "p90",
-    "progressive_pass_pct": "pct",
+    "final_third_passes": "p90",
+    "passes_to_box": "p90",
+    "key_passes": "p90",
+    "pass_mean_distance": "dist",
 }
-
-# (special-pass filter key, per-game label, xP-per-pass label, xP total key)
-XP_PA_SPECIAL_STATS: tuple[tuple[str, str, str, str], ...] = (
-    ("diagonal_long", "Diagonais longas (por jogo)", "xP/DL", "xp_diagonal_long_total"),
-    ("line_break", "Passes quebra-linha (por jogo)", "xP/QL", "xp_line_break_total"),
-    ("inversion", "Inversões (por jogo)", "xP/Inv", "xp_inversion_total"),
-    ("cross", "Cruzamentos (por jogo)", "xP/Cruz", "xp_cross_total"),
-)
 
 
 def _pa_simple_stat_value(value: float | int | None, kind: str) -> str:
@@ -5856,35 +5905,75 @@ def _pa_simple_stat_value(value: float | int | None, kind: str) -> str:
         return "—"
     if kind == "pct":
         return f"{val:.1f}%"
+    if kind == "dist":
+        return f"{val:.1f} m"
     if kind == "xp":
         return f"{val:.3f}"
     return f"{val:.1f}"
 
 
-def _pa_regular_stat_value(player: dict, key: str) -> str:
-    if key == "progressive_pass_pct":
-        passes = float(player.get("passes_total") or 0.0)
-        prog = float(player.get("progressive_passes") or 0.0)
-        if passes <= 0:
-            return "—"
-        return _pa_simple_stat_value(prog / passes * 100.0, "pct")
-    return _pa_simple_stat_value(player.get(key), XP_PA_REGULAR_STAT_KIND.get(key, "p90"))
+def _pa_regular_stat_value(source: dict, key: str) -> str:
+    return _pa_simple_stat_value(source.get(key), XP_PA_REGULAR_STAT_KIND.get(key, "p90"))
 
 
-def _pa_regular_stats_panel_html(player: dict | None) -> str:
-    profile = player or {}
-    metric_ranks = profile.get("metric_ranks") if isinstance(profile.get("metric_ranks"), dict) else {}
-    lines = "".join(
-        _metric_line_html(
-            XP_PA_REGULAR_STAT_LABELS[key],
-            key,
-            _pa_regular_stat_value(profile, key),
-            metric_ranks,
-            show_rank=True,
-            label_fn=lambda k: XP_PA_REGULAR_STAT_LABELS.get(k, k),
-            tooltip_fn=lambda k: XP_PA_REGULAR_STAT_TOOLTIPS.get(k, ""),
-            rank_in_group_fn=pg_rank_in_group_label,
+def _pa_top_badge_html(rank_info: dict | None) -> str:
+    if not rank_info:
+        return ""
+    try:
+        rank = int(rank_info.get("rank") or 0)
+    except (TypeError, ValueError):
+        return ""
+    if rank <= 0:
+        return ""
+    if rank <= 5:
+        return (
+            '<span class="pa-top-badge pa-top-badge-5">'
+            '<i class="fa-solid fa-star" aria-hidden="true"></i>Top 5</span>'
         )
+    if rank <= 10:
+        return (
+            '<span class="pa-top-badge pa-top-badge-10">'
+            '<i class="fa-solid fa-medal" aria-hidden="true"></i>Top 10</span>'
+        )
+    return ""
+
+
+def _pa_regular_stat_line_html(source: dict, metric_ranks: dict, key: str) -> str:
+    label = XP_PA_REGULAR_STAT_LABELS.get(key, key)
+    tip = (XP_PA_REGULAR_STAT_TOOLTIPS.get(key, "") or "").strip()
+    if tip:
+        label_html = (
+            f'<span class="metric-tip" tabindex="0">{html.escape(label)}'
+            f'<span class="metric-tipbox">{html.escape(tip)}</span></span>'
+        )
+    else:
+        label_html = html.escape(label)
+    value = _pa_regular_stat_value(source, key)
+    badge = _pa_top_badge_html(metric_ranks.get(key))
+    value_inner = (
+        f'<span class="val-wrap">{badge}'
+        f'<span class="stat-val">{html.escape(value)}</span></span>'
+    )
+    return (
+        '<div class="metric-line">'
+        f"<span>{label_html}</span>"
+        f'<span style="text-align:right">{value_inner}</span>'
+        "</div>"
+    )
+
+
+def _pa_regular_stats_panel_html(
+    player: dict | None,
+    xp_profile: dict | None = None,
+) -> str:
+    source = {**(xp_profile or {}), **(player or {})}
+    metric_ranks = (
+        player.get("metric_ranks")
+        if isinstance((player or {}).get("metric_ranks"), dict)
+        else {}
+    )
+    lines = "".join(
+        _pa_regular_stat_line_html(source, metric_ranks, key)
         for key in XP_PA_REGULAR_STAT_KEYS
     )
     return (
@@ -5895,58 +5984,15 @@ def _pa_regular_stats_panel_html(player: dict | None) -> str:
     )
 
 
-def _pa_special_stats_panel_html(xp_profile: dict | None) -> str:
-    profile = xp_profile or {}
-    p90_keys = tuple(
-        xstats.special_pass_per_game_key(sp) for sp, _lbl, _xlbl, _tot in XP_PA_SPECIAL_STATS
-    )
-    metric_ranks = _xp_stats_metric_ranks_dict(profile, p90_keys)
-    lines: list[str] = []
-    for sp, per_game_label, xp_label, xp_total_key in XP_PA_SPECIAL_STATS:
-        p90_key = xstats.special_pass_per_game_key(sp)
-        count = float(profile.get(xstats.special_pass_count_key(sp)) or 0.0)
-        xp_total = float(profile.get(xp_total_key) or 0.0)
-        per_pass = (xp_total / count) if count > 0 else None
-        lines.append(
-            _metric_line_html(
-                per_game_label,
-                p90_key,
-                _pa_simple_stat_value(profile.get(p90_key), "p90"),
-                metric_ranks,
-                show_rank=True,
-                label_fn=lambda _k, _lbl=per_game_label: _lbl,
-                tooltip_fn=lambda _k: "",
-                rank_in_group_fn=_xp_rank_in_group_label,
-            )
-        )
-        lines.append(
-            _metric_line_html(
-                xp_label,
-                "",
-                _pa_simple_stat_value(per_pass, "xp"),
-                {},
-                show_rank=False,
-            )
-        )
-    body = "".join(lines)
-    return (
-        '<div class="pa-xp-section-panel">'
-        '<div class="pa-xp-section-title">Special Stats</div>'
-        f'<div class="pa-xp-section-body">{body}</div>'
-        "</div>"
-    )
-
-
 def _build_xp_stats_card_html(
     xp_profile: dict | None,
     player: dict | None = None,
 ) -> str:
-    regular_html = _pa_regular_stats_panel_html(player)
-    special_html = _pa_special_stats_panel_html(xp_profile)
+    regular_html = _pa_regular_stats_panel_html(player, xp_profile)
     return (
         '<div class="player-card pa-pillars-card">'
         '<div class="pa-pillars-stack"><div class="pa-pillar-group">'
-        f"{regular_html}{special_html}"
+        f"{regular_html}"
         "</div></div>"
         "</div>"
     )
@@ -7165,6 +7211,14 @@ def _selected_position_blocks_label(
     return ", ".join(labels) if labels else "—"
 
 
+def _special_stat_tag_html() -> str:
+    return (
+        '<span class="special-stat-tag">'
+        '<i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>'
+        "Special stat</span>"
+    )
+
+
 def _scatter_default_metric_index(metric_keys: list[str], preferred: str) -> int:
     try:
         return metric_keys.index(preferred)
@@ -7211,6 +7265,8 @@ def render_scatter_section(
                 index=_scatter_default_metric_index(metric_keys, "xp_per_90"),
                 key=SCATTER_X_METRIC_KEY,
             )
+            if xstats.is_scatter_special_metric(x_key):
+                st.markdown(_special_stat_tag_html(), unsafe_allow_html=True)
         with axis_y_col:
             y_key = st.selectbox(
                 "Eixo Y",
@@ -7219,6 +7275,8 @@ def render_scatter_section(
                 index=_scatter_default_metric_index(metric_keys, "xp_m4_per_pass"),
                 key=SCATTER_Y_METRIC_KEY,
             )
+            if xstats.is_scatter_special_metric(y_key):
+                st.markdown(_special_stat_tag_html(), unsafe_allow_html=True)
 
     highlight_player_id: str | None = None
     with player_col:
@@ -7373,6 +7431,8 @@ def render_maps_section(
         format_func=xstats.maps_pass_type_label,
         key=MAPS_SPECIAL_PASS_KEY,
     )
+    if xstats.is_maps_special_pass(map_filter_key):
+        st.markdown(_special_stat_tag_html(), unsafe_allow_html=True)
     map_category_label = xstats.maps_pass_type_label(map_filter_key)
 
     st.markdown('<div class="pa-maps-compact">', unsafe_allow_html=True)
@@ -7392,7 +7452,9 @@ def render_maps_section(
             show_labels=False,
             cmap=_CMAP_XP_GRAY_RED,
         )
-        st.pyplot(fig, clear_figure=True, use_container_width=True)
+        map_col, _map_spacer = st.columns([3, 2], gap="small")
+        with map_col:
+            st.pyplot(fig, clear_figure=True, use_container_width=True)
         st.caption(
             f"{len(work)} passes completos · cor do passe = xP (cinza → vermelho forte)"
         )

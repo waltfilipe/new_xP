@@ -172,10 +172,21 @@ MAPS_PASS_TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("cross", "Cruzamentos"),
 )
 MAPS_PASS_TYPE_LABELS: dict[str, str] = dict(MAPS_PASS_TYPE_OPTIONS)
+# Pass types from the special-pass family (flagged in the UI). Progressive is not special.
+MAPS_SPECIAL_PASS_TYPE_KEYS: frozenset[str] = frozenset({
+    "diagonal_long",
+    "line_break",
+    "inversion",
+    "cross",
+})
 
 
 def maps_pass_type_label(filter_key: str) -> str:
     return MAPS_PASS_TYPE_LABELS.get(str(filter_key), str(filter_key))
+
+
+def is_maps_special_pass(filter_key: str) -> bool:
+    return str(filter_key) in MAPS_SPECIAL_PASS_TYPE_KEYS
 
 
 def special_pass_count_key(filter_key: str) -> str:
@@ -802,6 +813,13 @@ SCATTER_METRIC_OPTIONS: tuple[tuple[str, str], ...] = (
     ("special_cross_p90", "Cruzamentos / jogo"),
 )
 SCATTER_METRIC_LABELS: dict[str, str] = dict(SCATTER_METRIC_OPTIONS)
+# Scatter axes that come from the special-pass family (flagged in the UI).
+SCATTER_SPECIAL_METRIC_KEYS: frozenset[str] = frozenset({
+    "special_diagonal_long_p90",
+    "special_line_break_p90",
+    "special_inversion_p90",
+    "special_cross_p90",
+})
 
 
 def iter_scatter_metric_options() -> tuple[tuple[str, str], ...]:
@@ -810,6 +828,10 @@ def iter_scatter_metric_options() -> tuple[tuple[str, str], ...]:
 
 def scatter_metric_label(key: str) -> str:
     return SCATTER_METRIC_LABELS.get(key, stats_metric_label(key))
+
+
+def is_scatter_special_metric(key: str) -> bool:
+    return str(key) in SCATTER_SPECIAL_METRIC_KEYS
 
 
 SCATTER_BAND_OPTIONS: tuple[tuple[str, str], ...] = (
