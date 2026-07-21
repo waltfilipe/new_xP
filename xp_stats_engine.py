@@ -163,22 +163,40 @@ SPECIAL_PASS_MAP_FILTER_KEYS: tuple[str, ...] = tuple(key for key, _label in SPE
 SPECIAL_PASS_MAP_FILTER_LABELS: dict[str, str] = dict(SPECIAL_PASS_MAP_FILTERS)
 SPECIAL_PASS_COUNT_KEYS: tuple[str, ...] = SPECIAL_PASS_MAP_FILTER_KEYS
 
-# Maps tab — selectable pass types (ordered) with analyst-facing labels.
-MAPS_PASS_TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
+# Maps tab — selectable pass types grouped by stat type.
+MAPS_REGULAR_PASS_OPTIONS: tuple[tuple[str, str], ...] = (
     ("progressive", "Passes Progressivos"),
+    ("into_final_third", "Passes para terço final"),
+    ("into_box", "Passes para área"),
+)
+MAPS_SPECIAL_PASS_OPTIONS: tuple[tuple[str, str], ...] = (
     ("diagonal_long", "Diagonais Longas"),
     ("line_break", "Passes Quebra Linha"),
     ("inversion", "Inversões"),
     ("cross", "Cruzamentos"),
 )
+MAPS_STAT_TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("regular", "Regular Stats"),
+    ("special", "Special Stat"),
+)
+MAPS_PASS_TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
+    *MAPS_REGULAR_PASS_OPTIONS,
+    *MAPS_SPECIAL_PASS_OPTIONS,
+)
 MAPS_PASS_TYPE_LABELS: dict[str, str] = dict(MAPS_PASS_TYPE_OPTIONS)
-# Pass types from the special-pass family (flagged in the UI). Progressive is not special.
-MAPS_SPECIAL_PASS_TYPE_KEYS: frozenset[str] = frozenset({
-    "diagonal_long",
-    "line_break",
-    "inversion",
-    "cross",
-})
+MAPS_SPECIAL_PASS_TYPE_KEYS: frozenset[str] = frozenset(
+    key for key, _label in MAPS_SPECIAL_PASS_OPTIONS
+)
+
+
+def maps_stat_type_options() -> tuple[tuple[str, str], ...]:
+    return MAPS_STAT_TYPE_OPTIONS
+
+
+def maps_pass_options_for_type(stat_type: str) -> tuple[tuple[str, str], ...]:
+    if str(stat_type) == "special":
+        return MAPS_SPECIAL_PASS_OPTIONS
+    return MAPS_REGULAR_PASS_OPTIONS
 
 
 def maps_pass_type_label(filter_key: str) -> str:
@@ -187,6 +205,22 @@ def maps_pass_type_label(filter_key: str) -> str:
 
 def is_maps_special_pass(filter_key: str) -> bool:
     return str(filter_key) in MAPS_SPECIAL_PASS_TYPE_KEYS
+
+
+def filter_passes_for_map(passes: pd.DataFrame, filter_key: str) -> pd.DataFrame:
+    """Return completed passes matching a Maps pass-type selection."""
+    work = _completed_pass_frame(passes)
+    if work.empty:
+        return work
+    key = str(filter_key or "").strip()
+    if key == "into_final_third":
+        x_end = work["x_end"].to_numpy(dtype=float)
+        return work.loc[x_end >= pe.FINAL_THIRD_LINE_X].copy()
+    if key == "into_box":
+        x_end = work["x_end"].to_numpy(dtype=float)
+        y_end = work["y_end"].to_numpy(dtype=float)
+        return work.loc[_in_penalty_box(x_end, y_end)].copy()
+    return filter_passes_by_special_type(work, key)
 
 
 def special_pass_count_key(filter_key: str) -> str:
@@ -797,20 +831,37 @@ def iter_stats_metric_options() -> tuple[tuple[str, str], ...]:
     return tuple(seen.items())
 
 
-# Dispersão (scatter) — restricted, analyst-facing metric set.
-SCATTER_METRIC_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("xp_per_90", "xP / jogo"),
-    ("threat_passes_p90", "Ações de impacto / jogo"),
-    ("xp_m4_per_pass", "Impacto por ação · xP / passe"),
-    ("xp_m4_per_threat_pass", "Impacto por ação · xP / ação"),
-    ("xp_residual_median", "Entrega vs esperado · resíduo mediano"),
-    ("xp_game_std_adj_score", "Consistência · estabilidade"),
+# Dispersão (scatter) — analyst-facing metrics split into two stat types.
+# Regular Stats: card stats minus the completion (% acerto) ones.
+SCATTER_REGULAR_METRIC_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("passes_total", "Passes / jogo"),
     ("long_balls", "Passes longos / jogo"),
     ("progressive_passes", "Passes progressivos / jogo"),
+    ("final_third_passes", "Passes para terço final / jogo"),
+    ("passes_to_box", "Passes para área / jogo"),
+    ("key_passes", "Key passes / jogo"),
+    ("pass_mean_distance", "Distância média do passe"),
+)
+# Special Stat: special passes plus the xP metrics.
+SCATTER_SPECIAL_METRIC_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("xp_per_90", "xP / jogo"),
+    ("threat_passes_p90", "Ações de impacto / jogo"),
+    ("xp_m4_per_pass", "xP / passe"),
+    ("xp_m4_per_threat_pass", "xP / ação de impacto"),
+    ("xp_residual_median", "Resíduo mediano"),
+    ("xp_game_std_adj_score", "Estabilidade"),
     ("special_diagonal_long_p90", "Diagonais longas / jogo"),
     ("special_line_break_p90", "Passes quebra-linha / jogo"),
     ("special_inversion_p90", "Inversões / jogo"),
     ("special_cross_p90", "Cruzamentos / jogo"),
+)
+SCATTER_STAT_TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("regular", "Regular Stats"),
+    ("special", "Special Stat"),
+)
+SCATTER_METRIC_OPTIONS: tuple[tuple[str, str], ...] = (
+    *SCATTER_REGULAR_METRIC_OPTIONS,
+    *SCATTER_SPECIAL_METRIC_OPTIONS,
 )
 SCATTER_METRIC_LABELS: dict[str, str] = dict(SCATTER_METRIC_OPTIONS)
 # Scatter axes that come from the special-pass family (flagged in the UI).
@@ -824,6 +875,16 @@ SCATTER_SPECIAL_METRIC_KEYS: frozenset[str] = frozenset({
 
 def iter_scatter_metric_options() -> tuple[tuple[str, str], ...]:
     return SCATTER_METRIC_OPTIONS
+
+
+def scatter_stat_type_options() -> tuple[tuple[str, str], ...]:
+    return SCATTER_STAT_TYPE_OPTIONS
+
+
+def scatter_metric_options_for_type(stat_type: str) -> tuple[tuple[str, str], ...]:
+    if str(stat_type) == "special":
+        return SCATTER_SPECIAL_METRIC_OPTIONS
+    return SCATTER_REGULAR_METRIC_OPTIONS
 
 
 def scatter_metric_label(key: str) -> str:
@@ -1482,8 +1543,13 @@ def format_stats_value(key: str, value: float | int | None) -> str:
         return f"{val:.3f}"
     if key == "threat_passes_p90":
         return f"{val:.2f}"
-    if key in {"long_balls", "progressive_passes"}:
+    if key in {
+        "long_balls", "progressive_passes", "final_third_passes",
+        "passes_to_box", "key_passes",
+    }:
         return f"{val:.1f}"
+    if key == "pass_mean_distance":
+        return f"{val:.1f} m"
     if key.startswith("xp_residual"):
         return _format_residual_display(val)
     if key.endswith("_p90") or key == "xp_per_90" or key == "xp_game_mean" or key == "xp_game_std":

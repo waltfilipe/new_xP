@@ -178,10 +178,15 @@ MAPS_VIEW_TYPE_KEY = "maps_view_type"
 MAPS_THREAT_BAND_KEY = "maps_threat_band"
 MAPS_SPECIAL_PASS_KEY = "maps_special_pass_filter"
 MAPS_PASS_SELECT_KEY = "maps_pass_select"
+MAPS_POSITION_BLOCKS_KEY = "maps_position_blocks"
+MAPS_STAT_TYPE_KEY = "maps_stat_type"
+MAPS_STAT_TYPE_PREV_KEY = "maps_stat_type_prev"
 SCATTER_X_METRIC_KEY = "scatter_x_metric"
 SCATTER_Y_METRIC_KEY = "scatter_y_metric"
 SCATTER_X_BAND_KEY = "scatter_x_band"
 SCATTER_Y_BAND_KEY = "scatter_y_band"
+SCATTER_STAT_TYPE_KEY = "scatter_stat_type"
+SCATTER_STAT_TYPE_PREV_KEY = "scatter_stat_type_prev"
 SCATTER_POSITION_BLOCKS_KEY = "scatter_position_blocks"
 SCATTER_HIGHLIGHT_PLAYER_KEY = "scatter_highlight_player"
 ESTUDO_PLAYER_SELECT_KEY = "estudo_player_select"
@@ -1790,6 +1795,65 @@ st.markdown(
     }
     .pres-mini-card h4 { margin: 0 0 0.3rem 0; color: #93c5fd; font-size: 0.92rem; }
     .pres-mini-card p { margin: 0; color: #94a3b8; font-size: 0.84rem; line-height: 1.42; }
+    .pres-cards-4 {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.7rem;
+        margin-bottom: 0.85rem;
+    }
+    @media (max-width: 900px) {
+        .pres-cards-4 { grid-template-columns: repeat(2, 1fr); }
+    }
+    .pres-tile {
+        background: linear-gradient(160deg, #151b2b 0%, #101522 100%);
+        border: 1px solid #2a3550;
+        border-radius: 14px;
+        padding: 0.95rem 0.9rem;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+    .pres-tile:hover { border-color: #3b82f6; transform: translateY(-2px); }
+    .pres-tile .pres-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 10px;
+        font-size: 0.95rem;
+        color: #dbeafe;
+        background: rgba(59, 130, 246, 0.16);
+        border: 1px solid rgba(96, 165, 250, 0.4);
+        margin-bottom: 0.15rem;
+    }
+    .pres-tile.pres-dim .pres-icon {
+        color: #e9d5ff;
+        background: rgba(124, 58, 237, 0.18);
+        border-color: rgba(167, 139, 250, 0.45);
+    }
+    .pres-tile h5 {
+        margin: 0;
+        color: #f1f5f9;
+        font-size: 0.9rem;
+        font-weight: 700;
+    }
+    .pres-tile p {
+        margin: 0;
+        color: #94a3b8;
+        font-size: 0.8rem;
+        line-height: 1.4;
+    }
+    .pres-section-label {
+        margin: 0.35rem 0 0.55rem;
+        color: #8fa3bf;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+    }
     .pres-feature-card {
         background: linear-gradient(160deg, #151b2b 0%, #101522 100%);
         border: 1px solid #2a3550;
@@ -7252,14 +7316,6 @@ def _selected_position_blocks_label(
     return ", ".join(labels) if labels else "—"
 
 
-def _special_stat_tag_html() -> str:
-    return (
-        '<span class="special-stat-tag">'
-        '<i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>'
-        "Special stat</span>"
-    )
-
-
 def _scatter_default_metric_index(metric_keys: list[str], preferred: str) -> int:
     try:
         return metric_keys.index(preferred)
@@ -7279,68 +7335,78 @@ def render_scatter_section(
         st.info("No players available.")
         return
 
-    with st.container(key="scatter_position_slicer"):
-        position_codes, position_groups = _render_position_block_slicer(
-            key_prefix="scatter",
-            state_key=SCATTER_POSITION_BLOCKS_KEY,
-            blocks=SCATTER_POSITION_BLOCKS,
-            block_map=SCATTER_POSITION_BLOCK_BY_ID,
-        )
+    pos_col, player_col = st.columns([1, 1], gap="medium")
+    with pos_col:
+        with st.container(key="scatter_position_slicer"):
+            position_codes, position_groups = _render_position_block_slicer(
+                key_prefix="scatter",
+                state_key=SCATTER_POSITION_BLOCKS_KEY,
+                blocks=SCATTER_POSITION_BLOCKS,
+                block_map=SCATTER_POSITION_BLOCK_BY_ID,
+            )
 
     if not position_codes and not position_groups:
         st.info("Selecione uma posição para ver o gráfico.")
         return
 
-    metric_options = xstats.iter_scatter_metric_options()
+    highlight_player_id: str | None = None
+    with player_col:
+        with st.container(key="scatter_player_slicer"):
+            player_options = _player_analysis_options(
+                all_players,
+                progression_by_id,
+                position_codes=position_codes,
+                position_groups=position_groups,
+                xp_by_id=xp_by_id,
+            )
+            if player_options:
+                labels = [option[3] for option in player_options]
+                id_by_label = {option[3]: option[0] for option in player_options}
+                selected_label = st.selectbox(
+                    "Jogador",
+                    options=labels,
+                    key=SCATTER_HIGHLIGHT_PLAYER_KEY,
+                    placeholder="Selecione para destacar",
+                )
+                if selected_label:
+                    highlight_player_id = id_by_label[selected_label]
+            else:
+                st.info("Nenhum jogador disponível para os filtros selecionados.")
+
+    type_keys = [key for key, _label in xstats.scatter_stat_type_options()]
+    type_labels = {key: label for key, label in xstats.scatter_stat_type_options()}
+    stat_type = st.selectbox(
+        "Tipo de stat",
+        options=type_keys,
+        format_func=lambda key: type_labels[key],
+        key=SCATTER_STAT_TYPE_KEY,
+    )
+    if st.session_state.get(SCATTER_STAT_TYPE_PREV_KEY) != stat_type:
+        st.session_state.pop(SCATTER_X_METRIC_KEY, None)
+        st.session_state.pop(SCATTER_Y_METRIC_KEY, None)
+        st.session_state[SCATTER_STAT_TYPE_PREV_KEY] = stat_type
+
+    metric_options = xstats.scatter_metric_options_for_type(stat_type)
     metric_keys = [key for key, _label in metric_options]
     metric_labels = {key: label for key, label in metric_options}
 
-    metric_col, player_col = st.columns([2.1, 1], gap="medium")
-    with metric_col:
-        axis_x_col, axis_y_col = st.columns(2, gap="small")
-        with axis_x_col:
-            x_key = st.selectbox(
-                "Eixo X",
-                options=metric_keys,
-                format_func=lambda key: metric_labels[key],
-                index=_scatter_default_metric_index(metric_keys, "xp_per_90"),
-                key=SCATTER_X_METRIC_KEY,
-            )
-            if xstats.is_scatter_special_metric(x_key):
-                st.markdown(_special_stat_tag_html(), unsafe_allow_html=True)
-        with axis_y_col:
-            y_key = st.selectbox(
-                "Eixo Y",
-                options=metric_keys,
-                format_func=lambda key: metric_labels[key],
-                index=_scatter_default_metric_index(metric_keys, "xp_m4_per_pass"),
-                key=SCATTER_Y_METRIC_KEY,
-            )
-            if xstats.is_scatter_special_metric(y_key):
-                st.markdown(_special_stat_tag_html(), unsafe_allow_html=True)
-
-    highlight_player_id: str | None = None
-    with player_col:
-        player_options = _player_analysis_options(
-            all_players,
-            progression_by_id,
-            position_codes=position_codes,
-            position_groups=position_groups,
-            xp_by_id=xp_by_id,
+    axis_x_col, axis_y_col = st.columns(2, gap="small")
+    with axis_x_col:
+        x_key = st.selectbox(
+            "Eixo X",
+            options=metric_keys,
+            format_func=lambda key: metric_labels[key],
+            index=0,
+            key=SCATTER_X_METRIC_KEY,
         )
-        if player_options:
-            labels = [option[3] for option in player_options]
-            id_by_label = {option[3]: option[0] for option in player_options}
-            selected_label = st.selectbox(
-                "Jogador",
-                options=labels,
-                key=SCATTER_HIGHLIGHT_PLAYER_KEY,
-                placeholder="Selecione para destacar",
-            )
-            if selected_label:
-                highlight_player_id = id_by_label[selected_label]
-        else:
-            st.info("Nenhum jogador disponível para os filtros selecionados.")
+    with axis_y_col:
+        y_key = st.selectbox(
+            "Eixo Y",
+            options=metric_keys,
+            format_func=lambda key: metric_labels[key],
+            index=min(1, len(metric_keys) - 1),
+            key=SCATTER_Y_METRIC_KEY,
+        )
 
     pool, thresholds = _scatter_pool_players(
         all_players,
@@ -7444,21 +7510,53 @@ def render_maps_section(
     *,
     xp_by_id: dict[str, dict] | None = None,
 ) -> None:
-    st.subheader("Maps — Special Passes")
+    st.subheader("Maps — Passes no campo")
 
     if not all_players:
         st.info("No players available.")
         return
 
     players_by_id = {str(p["player_id"]): p for p in all_players}
-    player_id = _render_player_only_slicer(
-        all_players,
-        progression_by_id,
-        players_by_id,
-        xp_by_id=xp_by_id,
-        key_prefix="maps",
-    )
+
+    pos_col, player_col = st.columns([1, 1], gap="medium")
+    with pos_col:
+        with st.container(key="maps_position_slicer"):
+            position_codes, position_groups = _render_position_block_slicer(
+                key_prefix="maps",
+                state_key=MAPS_POSITION_BLOCKS_KEY,
+            )
+    if not position_codes and not position_groups:
+        st.info("Selecione uma posição para continuar.")
+        return
+
+    player_id: str | None = None
+    with player_col:
+        with st.container(key="maps_player_slicer"):
+            player_options = _player_analysis_options(
+                all_players,
+                progression_by_id,
+                position_codes=position_codes,
+                position_groups=position_groups,
+                xp_by_id=xp_by_id,
+            )
+            if not player_options:
+                st.info("Nenhum jogador disponível para os filtros selecionados.")
+                return
+            labels = [option[3] for option in player_options]
+            id_by_label = {option[3]: option[0] for option in player_options}
+            select_key = _player_select_widget_key("maps")
+            if st.session_state.get(select_key) not in labels:
+                st.session_state.pop(select_key, None)
+            selected_label = st.selectbox(
+                "Jogador",
+                options=labels,
+                key=select_key,
+                placeholder="Selecione um jogador",
+            )
+            if selected_label:
+                player_id = id_by_label[selected_label]
     if not player_id:
+        st.info("Selecione um jogador para continuar.")
         return
 
     player = (xp_by_id or {}).get(str(player_id)) or players_by_id.get(str(player_id))
@@ -7466,19 +7564,34 @@ def render_maps_section(
         st.warning("Could not load player profile.")
         return
 
-    map_filter_key = st.selectbox(
-        "Tipo de passe",
-        options=[key for key, _label in xstats.MAPS_PASS_TYPE_OPTIONS],
-        format_func=xstats.maps_pass_type_label,
-        key=MAPS_SPECIAL_PASS_KEY,
-    )
-    if xstats.is_maps_special_pass(map_filter_key):
-        st.markdown(_special_stat_tag_html(), unsafe_allow_html=True)
+    type_col, stat_col = st.columns([1, 1], gap="medium")
+    with type_col:
+        type_keys = [key for key, _label in xstats.maps_stat_type_options()]
+        type_labels = {key: label for key, label in xstats.maps_stat_type_options()}
+        stat_type = st.selectbox(
+            "Tipo de stat",
+            options=type_keys,
+            format_func=lambda key: type_labels[key],
+            key=MAPS_STAT_TYPE_KEY,
+        )
+    if st.session_state.get(MAPS_STAT_TYPE_PREV_KEY) != stat_type:
+        st.session_state.pop(MAPS_SPECIAL_PASS_KEY, None)
+        st.session_state[MAPS_STAT_TYPE_PREV_KEY] = stat_type
+    with stat_col:
+        pass_options = xstats.maps_pass_options_for_type(stat_type)
+        pass_keys = [key for key, _label in pass_options]
+        pass_labels = {key: label for key, label in pass_options}
+        map_filter_key = st.selectbox(
+            "Stat",
+            options=pass_keys,
+            format_func=lambda key: pass_labels[key],
+            key=MAPS_SPECIAL_PASS_KEY,
+        )
     map_category_label = xstats.maps_pass_type_label(map_filter_key)
 
     st.markdown('<div class="pa-maps-compact">', unsafe_allow_html=True)
     raw_passes = xp_passes_by_player.get(str(player_id))
-    passes_df = _filter_special_passes_for_map(raw_passes, map_filter_key)
+    passes_df = xstats.filter_passes_for_map(raw_passes, map_filter_key)
     if passes_df is None or passes_df.empty:
         st.info("Nenhum passe completo para este jogador com o filtro selecionado.")
     else:
@@ -8258,45 +8371,47 @@ def render_presentation_tab(
 
     st.markdown(
         '<div class="pres-card pres-card-hero">'
-        f"<h4>{html.escape(APP_NAME)} — valor esperado do passe (xP)</h4>"
-        "<p>O <strong>xP (expected Pass value)</strong> estima o quanto cada passe "
-        "melhora a situação ofensiva da equipe. O modelo aprende, a partir de milhares de "
-        "passes, o valor esperado de uma ação considerando origem, destino e contexto — e "
-        "compara o que o jogador entregou com o que era esperado. "
-        f"Todas as métricas são comparadas com jogadores da <strong>mesma posição</strong> na "
-        f"{html.escape(APP_LEAGUE)}.</p></div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        '<div class="pres-card">'
-        "<h4>Como ler o xP Profile</h4>"
-        "<p>Cada jogador tem quatro dimensões, sempre relativas à posição (escala 3 a 9):</p>"
-        "</div>"
-        '<div class="pres-cards-row">'
-        '<div class="pres-mini-card"><h4>Impacto Geral</h4>'
-        "<p>Com que frequência participa gerando valor (xP por jogo e ações de impacto por jogo).</p></div>"
-        '<div class="pres-mini-card"><h4>Impacto por ação</h4>'
-        "<p>Quanto valor cada passe rende, no passe habitual e nas ações de maior impacto. "
-        "Não é taxa de acerto.</p></div>"
-        '<div class="pres-mini-card"><h4>Entrega vs Esperado</h4>'
-        "<p>Se costuma entregar mais valor do que a situação previa, comparado ao esperado "
-        "para passes de contexto semelhante.</p></div>"
-        "</div>"
-        '<div class="pres-cards-row">'
-        '<div class="pres-mini-card"><h4>Consistência</h4>'
-        "<p>Se mantém o nível de impacto de um jogo para o outro.</p></div>"
-        '<div class="pres-mini-card"><h4>Nota relativa</h4>'
-        "<p>Uma nota alta não é uma quantidade de passes nem um percentual de acerto: é a "
-        "posição do jogador frente aos pares da posição.</p></div>"
-        '<div class="pres-mini-card"><h4>Arquétipos</h4>'
-        "<p>A combinação das quatro dimensões resume o perfil do jogador (Elite, Criativo, "
-        "Segurança, Impacto, Limitado ou Regular).</p></div>"
+        f"<h4>{html.escape(APP_NAME)} · valor esperado do passe (xP)</h4>"
+        "<p>O <strong>xP</strong> mede quanto cada passe aproxima a equipe do gol — "
+        f"sempre comparado aos jogadores da mesma posição na {html.escape(APP_LEAGUE)}.</p>"
         "</div>",
         unsafe_allow_html=True,
     )
 
-    _render_pres_flow_steps()
+    st.markdown('<p class="pres-section-label">As 4 dimensões do xP Profile</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="pres-cards-4">'
+        '<div class="pres-tile pres-dim">'
+        '<span class="pres-icon"><i class="fa-solid fa-chart-simple"></i></span>'
+        "<h5>Impacto Geral</h5><p>Com que frequência gera valor.</p></div>"
+        '<div class="pres-tile pres-dim">'
+        '<span class="pres-icon"><i class="fa-solid fa-bolt"></i></span>'
+        "<h5>Impacto por ação</h5><p>Quanto cada passe rende.</p></div>"
+        '<div class="pres-tile pres-dim">'
+        '<span class="pres-icon"><i class="fa-solid fa-bullseye"></i></span>'
+        "<h5>Entrega vs Esperado</h5><p>Entrega além do previsto.</p></div>"
+        '<div class="pres-tile pres-dim">'
+        '<span class="pres-icon"><i class="fa-solid fa-wave-square"></i></span>'
+        "<h5>Consistência</h5><p>Mantém o nível entre jogos.</p></div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<p class="pres-section-label">Como navegar</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="pres-cards-row">'
+        '<div class="pres-tile">'
+        '<span class="pres-icon"><i class="fa-solid fa-user"></i></span>'
+        "<h5>Player Analysis</h5><p>Perfil completo de um jogador, com stats e rank na posição.</p></div>"
+        '<div class="pres-tile">'
+        '<span class="pres-icon"><i class="fa-solid fa-braille"></i></span>'
+        "<h5>Dispersão</h5><p>Compare jogadores de uma posição em um gráfico X/Y.</p></div>"
+        '<div class="pres-tile">'
+        '<span class="pres-icon"><i class="fa-solid fa-location-dot"></i></span>'
+        "<h5>Maps</h5><p>Veja os passes no campo, coloridos pelo xP.</p></div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _render_similarity_player_panel(
