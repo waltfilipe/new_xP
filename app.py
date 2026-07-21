@@ -3881,6 +3881,61 @@ st.markdown(
         background: rgba(59, 130, 246, 0.18);
         border: 1px solid rgba(96, 165, 250, 0.55);
     }
+    .pa-regular-stat-tip {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        cursor: help;
+    }
+    .pa-regular-stat-tipbox {
+        position: absolute;
+        right: 0;
+        bottom: calc(100% + 8px);
+        min-width: 11rem;
+        max-width: 15rem;
+        padding: 0.5rem 0.6rem;
+        border-radius: 8px;
+        border: 1px solid #334155;
+        background: rgba(15, 23, 42, 0.96);
+        color: #e2e8f0;
+        font-size: 0.72rem;
+        line-height: 1.35;
+        white-space: normal;
+        box-shadow: 0 10px 24px rgba(2, 6, 23, 0.45);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 0.14s ease, visibility 0.14s ease;
+        z-index: 30;
+        text-align: left;
+    }
+    .pa-regular-stat-tip:hover .pa-regular-stat-tipbox,
+    .pa-regular-stat-tip:focus-within .pa-regular-stat-tipbox {
+        opacity: 1;
+        visibility: visible;
+    }
+    .pa-regular-stat-tip-title {
+        display: block;
+        margin-bottom: 0.22rem;
+        color: #93c5fd;
+        font-size: 0.64rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+    .pa-regular-stat-tip-value {
+        display: block;
+        color: #f8fafc;
+        font-size: 0.86rem;
+        font-weight: 700;
+    }
+    .pa-regular-stat-tip-rank {
+        display: block;
+        margin-top: 0.28rem;
+        color: #94a3b8;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
     .special-stat-tag {
         display: inline-flex;
         align-items: center;
@@ -6294,6 +6349,45 @@ def _pa_top_badge_html(rank_info: dict | None) -> str:
     return ""
 
 
+def _pa_regular_stat_rank_info(
+    source: dict,
+    metric_ranks: dict,
+    key: str,
+) -> tuple[int, int] | None:
+    info = metric_ranks.get(key)
+    if isinstance(info, dict) and info.get("rank") and info.get("total"):
+        return int(info["rank"]), int(info["total"])
+    rank = source.get(f"{key}_rank_in_group")
+    total = source.get(f"{key}_rank_pool_in_group")
+    if rank and total:
+        return int(rank), int(total)
+    return None
+
+
+def _pa_regular_stat_value_tip_html(
+    label: str,
+    value: str,
+    rank_info: tuple[int, int] | None,
+    position_group: str | None,
+) -> str:
+    if not rank_info:
+        return f'<span class="stat-val">{html.escape(value)}</span>'
+    rank, total = rank_info
+    group = position_group_label(str(position_group or "—"))
+    plain = f"{label}: {value} · #{rank} de {total} · {group}"
+    tipbox = (
+        f'<span class="pa-regular-stat-tip-title">{html.escape(label)}</span>'
+        f'<span class="pa-regular-stat-tip-value">{html.escape(value)}</span>'
+        f'<span class="pa-regular-stat-tip-rank">#{rank} de {total} · {html.escape(group)}</span>'
+    )
+    return (
+        f'<span class="pa-regular-stat-tip" tabindex="0" title="{html.escape(plain, quote=True)}">'
+        f'<span class="stat-val">{html.escape(value)}</span>'
+        f'<span class="pa-regular-stat-tipbox">{tipbox}</span>'
+        "</span>"
+    )
+
+
 def _pa_regular_stat_line_html(source: dict, metric_ranks: dict, key: str) -> str:
     label = XP_PA_REGULAR_STAT_LABELS.get(key, key)
     tip = (XP_PA_REGULAR_STAT_TOOLTIPS.get(key, "") or "").strip()
@@ -6306,9 +6400,16 @@ def _pa_regular_stat_line_html(source: dict, metric_ranks: dict, key: str) -> st
         label_html = html.escape(label)
     value = _pa_regular_stat_value(source, key)
     badge = _pa_top_badge_html(metric_ranks.get(key))
+    rank_info = _pa_regular_stat_rank_info(source, metric_ranks, key)
+    value_html = _pa_regular_stat_value_tip_html(
+        label,
+        value,
+        rank_info,
+        str(source.get("position_group") or ""),
+    )
     value_inner = (
         f'<span class="val-wrap">{badge}'
-        f'<span class="stat-val">{html.escape(value)}</span></span>'
+        f"{value_html}</span>"
     )
     return (
         '<div class="metric-line">'

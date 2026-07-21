@@ -1020,6 +1020,18 @@ XP_PLAYER_ANALYSIS_RANK_METRICS: tuple[str, ...] = tuple(
     ) | dict.fromkeys(XP_COMPOSITE_INDEX_KEYS)
 )
 
+XP_REGULAR_STAT_RANK_KEYS: tuple[str, ...] = (
+    "passes_total",
+    "pass_completion_pct",
+    "long_balls",
+    "long_ball_completion_pct",
+    "progressive_passes",
+    "final_third_passes",
+    "passes_to_box",
+    "key_passes",
+    "pass_mean_distance",
+)
+
 
 def _zscore(series: pd.Series) -> pd.Series:
     std = float(series.std())
@@ -1481,7 +1493,9 @@ def attach_all_stats_ranks(players: list[dict]) -> None:
         group = str(player.get("position_group") or "CM")
         pools.setdefault(group, []).append(player)
     rank_metrics = tuple(
-        dict.fromkeys((*XP_STATS_RANK_METRICS, *XP_PLAYER_ANALYSIS_RANK_METRICS))
+        dict.fromkeys(
+            (*XP_STATS_RANK_METRICS, *XP_PLAYER_ANALYSIS_RANK_METRICS, *XP_REGULAR_STAT_RANK_KEYS)
+        )
     )
     for rows in pools.values():
         pool_size = len(rows)
