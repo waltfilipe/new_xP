@@ -98,6 +98,24 @@ def _load_xp_stats_engine():
     sys.modules["xp_stats_engine"] = module
     return module
 
+
+def _load_xp_study_maps():
+    """Load local xp_study_maps.py explicitly (avoids stale/shadowed module on Streamlit Cloud)."""
+    import importlib.util
+
+    module_path = _APP_ROOT / "xp_study_maps.py"
+    if not module_path.is_file():
+        raise ImportError(f"File not found: {module_path}")
+    module_name = "passes_xt_xp_study_maps"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules[module_name] = module
+    sys.modules["xp_study_maps"] = module
+    return module
+
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -140,13 +158,12 @@ from progression_maps import (
 xpe = _load_xp_study_engine()
 xe = _load_xp_engine()
 xstats = _load_xp_stats_engine()
-from xp_study_maps import (
-    CMAP_XP_GRAY_RED as _CMAP_XP_GRAY_RED,
-    draw_passes_destination_heatmap,
-    draw_special_passes_season_map,
-    draw_top_xp_passes_map,
-    draw_xp_destination_surface,
-)
+_xp_study_maps = _load_xp_study_maps()
+_CMAP_XP_GRAY_RED = _xp_study_maps.CMAP_XP_GRAY_RED
+draw_passes_destination_heatmap = _xp_study_maps.draw_passes_destination_heatmap
+draw_special_passes_season_map = _xp_study_maps.draw_special_passes_season_map
+draw_top_xp_passes_map = _xp_study_maps.draw_top_xp_passes_map
+draw_xp_destination_surface = _xp_study_maps.draw_xp_destination_surface
 
 XP_DATA_CACHE_VERSION = xe.XP_DATA_CACHE_VERSION
 
