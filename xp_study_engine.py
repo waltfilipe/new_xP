@@ -12,7 +12,7 @@ import passes_engine as pe
 
 STUDY_MATCH_EVENT_ID = 15526003
 XP_SMOOTHING = 1.0
-XP_BLEND_ALPHA = 0.4
+XP_BLEND_ALPHA = 0.0
 XP_PASS_MAX = 1.0
 
 FIELD_X = pe.FIELD_X
@@ -52,11 +52,11 @@ THREAT_XP_THRESHOLDS: dict[str, float] = {
     XP_MODEL_HIER_OD: 0.50,
 }
 
-DISTANCE_BAND_ORDER: tuple[str, ...] = ("short", "medium", "long")
+DISTANCE_BAND_ORDER: tuple[str, ...] = ("short", "long")
+XP_DISTANCE_BAND_MAX_SHORT_M = 30.0
 DISTANCE_BAND_LABELS: dict[str, str] = {
-    "short": "<15 m",
-    "medium": "15–25 m",
-    "long": ">25 m",
+    "short": "≤30 m",
+    "long": ">30 m",
 }
 
 
@@ -343,7 +343,7 @@ def build_team_xp_surfaces(
 
 @functools.lru_cache(maxsize=1)
 def _load_combined_league_pass_frame() -> pd.DataFrame:
-    """Serie B + Serie A + Premier League pass events for the global xP reference pool."""
+    """Serie B + Serie A (BR) + Premier League + Serie A (Itália) for the global xP reference pool."""
     frames: list[pd.DataFrame] = []
     serie_b = pe._load_season_pass_frame()
     if not serie_b.empty:
@@ -360,6 +360,11 @@ def _load_combined_league_pass_frame() -> pd.DataFrame:
         pl = premier_league.copy()
         pl["league_source"] = "premier_league"
         frames.append(pl)
+    italia_seriea = pe._load_italia_seriea_pass_frame()
+    if not italia_seriea.empty:
+        it = italia_seriea.copy()
+        it["league_source"] = "italia_seriea"
+        frames.append(it)
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
@@ -417,14 +422,19 @@ def _league_reference_surfaces(
         num_matches_serie_b = int(matches_by_league.get("serie_b", 0))
         num_matches_serie_a = int(matches_by_league.get("serie_a", 0))
         num_matches_premier_league = int(matches_by_league.get("premier_league", 0))
+        num_matches_italia_seriea = int(matches_by_league.get("italia_seriea", 0))
         num_matches = max(
-            num_matches_serie_b + num_matches_serie_a + num_matches_premier_league,
+            num_matches_serie_b
+            + num_matches_serie_a
+            + num_matches_premier_league
+            + num_matches_italia_seriea,
             1,
         )
     else:
         num_matches_serie_b = max(int(completed["event_id"].nunique()), 0)
         num_matches_serie_a = 0
         num_matches_premier_league = 0
+        num_matches_italia_seriea = 0
         num_matches = max(num_matches_serie_b, 1)
     dest_per_match = dest_count / num_matches
     od_per_match = od_count / num_matches
@@ -439,6 +449,7 @@ def _league_reference_surfaces(
         "num_matches_serie_b": num_matches_serie_b,
         "num_matches_serie_a": num_matches_serie_a,
         "num_matches_premier_league": num_matches_premier_league,
+        "num_matches_italia_seriea": num_matches_italia_seriea,
         "league_passes": int(len(completed)),
     }
 
@@ -655,9 +666,7 @@ def normalize_xp_model(model: str | None) -> str:
 
 def _distance_band_series(distances: pd.Series | np.ndarray) -> pd.Series:
     dist = np.asarray(distances, dtype=float)
-    bands = np.full(len(dist), "medium", dtype=object)
-    bands[dist < pe.DISTANCE_SHORT_MAX_M] = "short"
-    bands[dist > pe.DISTANCE_MEDIUM_MAX_M] = "long"
+    bands = np.where(dist <= XP_DISTANCE_BAND_MAX_SHORT_M, "short", "long")
     return pd.Series(bands, index=getattr(distances, "index", None))
 
 
@@ -800,6 +809,7 @@ def load_study_match_bundle(
         "league_matches_serie_b": int(league.get("num_matches_serie_b", 0)),
         "league_matches_serie_a": int(league.get("num_matches_serie_a", 0)),
         "league_matches_premier_league": int(league.get("num_matches_premier_league", 0)),
+        "league_matches_italia_seriea": int(league.get("num_matches_italia_seriea", 0)),
         "league_passes": int(league.get("league_passes", 0)),
         "blend_alpha": XP_BLEND_ALPHA,
         "xp_pass_max": XP_PASS_MAX,

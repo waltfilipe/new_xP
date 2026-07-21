@@ -10,9 +10,24 @@ import xp_study_engine as xse
 
 FIELD_X = pe.FIELD_X
 FIELD_Y = pe.FIELD_Y
-FINAL_THIRD_X = 80.0
-WIDE_Y_MAX = 20.0
-WIDE_Y_MIN = 60.0
+DEF_FIELD_SHARE = 0.40
+FINAL_FIELD_SHARE = 0.40
+DEF_X_MAX = FIELD_X * DEF_FIELD_SHARE
+FINAL_X_MIN = FIELD_X * (1.0 - FINAL_FIELD_SHARE)
+FIRST_THIRD_X = FIELD_X / 3.0
+CENTRAL_Y_MIN = 20.0
+CENTRAL_Y_MAX = 60.0
+LATERAL_INNER_SHARE = 0.30
+LINE_BREAK_FORWARD_ANGLE_DEG = 40.0
+LINE_BREAK_FIELD_BEFORE_30_X = FIELD_X * 0.30
+LINE_BREAK_FIELD_MID_50_X = FIELD_X * 0.50
+LINE_BREAK_DIST_MIN_ATTACK_M = 10.0
+LINE_BREAK_DIST_MIN_MID_M = 15.0
+LINE_BREAK_DIST_MAX_M = 25.0
+CROSS_DIST_MIN_M = 15.0
+CROSS_LATERAL_DELTA_MIN_M = 8.0
+CROSS_MAX_START_X = 102.0
+FROM_DEEP_DIST_MIN_M = 15.0
 PENALTY_X_MIN = pe.PENALTY_BOX_X_MIN
 PENALTY_Y_MIN = pe.PENALTY_BOX_Y_MIN
 PENALTY_Y_MAX = pe.PENALTY_BOX_Y_MAX
@@ -21,8 +36,7 @@ XP_COL = "xp_m4"
 THREAT_COL = "is_threat_m4"
 RESIDUAL_COL = "xp_residual"
 DISTANCE_BAND_LABELS = xse.DISTANCE_BAND_LABELS
-DISTANCE_SHORT_MAX_M = pe.DISTANCE_SHORT_MAX_M
-DISTANCE_MEDIUM_MAX_M = pe.DISTANCE_MEDIUM_MAX_M
+XP_DISTANCE_BAND_MAX_SHORT_M = xse.XP_DISTANCE_BAND_MAX_SHORT_M
 BANDS = xse.DISTANCE_BAND_ORDER
 DISTANCE_INDEX_MIN_PASS_PERCENTILE = 20
 
@@ -53,25 +67,265 @@ DISTANCE_INDEX_VOLUME_GRADE_PENALTY_PCTS: tuple[tuple[float, int], ...] = (
 
 def _zone_x(x: np.ndarray) -> np.ndarray:
     out = np.full(len(x), "mid", dtype=object)
-    out[x <= 40] = "def"
-    out[x > 80] = "att"
+    out[x <= FIRST_THIRD_X] = "def"
+    out[x > FINAL_X_MIN] = "att"
     return out
+
+
+def _is_left_corridor(y: np.ndarray) -> np.ndarray:
+    return y < CENTRAL_Y_MIN
+
+
+def _is_right_corridor(y: np.ndarray) -> np.ndarray:
+    return y > CENTRAL_Y_MAX
+
+
+def _is_central_corridor(y: np.ndarray) -> np.ndarray:
+    return (y >= CENTRAL_Y_MIN) & (y <= CENTRAL_Y_MAX)
+
+
+def _is_lateral_corridor(y: np.ndarray) -> np.ndarray:
+    return _is_left_corridor(y) | _is_right_corridor(y)
+
+
+def _is_diagonal_long_pass(y_start: np.ndarray, y_end: np.ndarray) -> np.ndarray:
+    """Swap laterally: left/central -> right, or right/central -> left."""
+    to_right = (
+        (_is_left_corridor(y_start) | _is_central_corridor(y_start))
+        & _is_right_corridor(y_end)
+    )
+    to_left = (
+        (_is_right_corridor(y_start) | _is_central_corridor(y_start))
+        & _is_left_corridor(y_end)
+    )
+    return to_right | to_left
+
+
+def _line_break_origin_corridor(y: np.ndarray) -> np.ndarray:
+    """Central corridor plus the inner 30% of each lateral band (adjacent to center)."""
+    left_inner = (y < CENTRAL_Y_MIN) & (y >= CENTRAL_Y_MIN * (1.0 - LATERAL_INNER_SHARE))
+    right_inner = (y > CENTRAL_Y_MAX) & (
+        y <= CENTRAL_Y_MAX + (FIELD_Y - CENTRAL_Y_MAX) * LATERAL_INNER_SHARE
+    )
+    central = _is_central_corridor(y)
+    return central | left_inner | right_inner
+
+
+def _line_break_distance_ok(x_start: np.ndarray, dist: np.ndarray) -> np.ndarray:
+    """Distance bands by origin zone: none before 30%, 15–25 m at 30–50%, 10–25 m in attack."""
+    before_30 = x_start <= LINE_BREAK_FIELD_BEFORE_30_X
+    mid_zone = (x_start > LINE_BREAK_FIELD_BEFORE_30_X) & (x_start <= LINE_BREAK_FIELD_MID_50_X)
+    attack_zone = x_start > LINE_BREAK_FIELD_MID_50_X
+    return (
+        ~before_30
+        & (
+            (mid_zone & (dist >= LINE_BREAK_DIST_MIN_MID_M) & (dist <= LINE_BREAK_DIST_MAX_M))
+            | (attack_zone & (dist >= LINE_BREAK_DIST_MIN_ATTACK_M) & (dist <= LINE_BREAK_DIST_MAX_M))
+        )
+    )
+
+
+def _is_forward_angle(dx: np.ndarray, dy: np.ndarray, *, max_angle_deg: float) -> np.ndarray:
+    """True when the pass aims forward (+x) within ±max_angle_deg of the goal direction."""
+    forward = dx > 0.0
+    angle_deg = np.degrees(np.arctan2(dy, np.where(forward, dx, 1.0)))
+    return forward & (np.abs(angle_deg) <= max_angle_deg)
+
+
+def _is_left_right_inversion(y_start: np.ndarray, y_end: np.ndarray) -> np.ndarray:
+    """Long pass that switches directly between left and right lateral corridors."""
+    left_to_right = _is_left_corridor(y_start) & _is_right_corridor(y_end)
+    right_to_left = _is_right_corridor(y_start) & _is_left_corridor(y_end)
+    return left_to_right | right_to_left
+
+
+def _in_penalty_box(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    return (x >= PENALTY_X_MIN) & (y >= PENALTY_Y_MIN) & (y <= PENALTY_Y_MAX)
+
+
+def _is_long_pass(scored: pd.DataFrame, dist: np.ndarray) -> np.ndarray:
+    if "distance_band" in scored.columns:
+        return scored["distance_band"].astype(str).to_numpy() == "long"
+    return dist > XP_DISTANCE_BAND_MAX_SHORT_M
+
+
+SPECIAL_PASS_MAP_FILTERS: tuple[tuple[str, str], ...] = (
+    ("progressive", "Passes Progressivos"),
+    ("diagonal_long", "Diagonal Longa"),
+    ("line_break", "Quebra linha"),
+    ("inversion", "Inversões"),
+    ("cross", "Cruzamento"),
+    ("from_deep", "xP from deep"),
+    ("final_third", "% xP no terço final"),
+    ("in_box", "% xP na área"),
+)
+SPECIAL_PASS_MAP_FILTER_KEYS: tuple[str, ...] = tuple(key for key, _label in SPECIAL_PASS_MAP_FILTERS)
+SPECIAL_PASS_MAP_FILTER_LABELS: dict[str, str] = dict(SPECIAL_PASS_MAP_FILTERS)
+SPECIAL_PASS_COUNT_KEYS: tuple[str, ...] = SPECIAL_PASS_MAP_FILTER_KEYS
+
+# Maps tab — selectable pass types grouped by stat type.
+MAPS_REGULAR_PASS_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("progressive", "Passes Progressivos"),
+    ("into_final_third", "Passes para terço final"),
+    ("into_box", "Passes para área"),
+)
+MAPS_SPECIAL_PASS_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("diagonal_long", "Diagonais Longas"),
+    ("line_break", "Passes Quebra Linha"),
+    ("inversion", "Inversões"),
+    ("cross", "Cruzamentos"),
+)
+MAPS_STAT_TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("regular", "Regular Stats"),
+    ("special", "Special Stat"),
+)
+MAPS_PASS_TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
+    *MAPS_REGULAR_PASS_OPTIONS,
+    *MAPS_SPECIAL_PASS_OPTIONS,
+)
+MAPS_PASS_TYPE_LABELS: dict[str, str] = dict(MAPS_PASS_TYPE_OPTIONS)
+MAPS_SPECIAL_PASS_TYPE_KEYS: frozenset[str] = frozenset(
+    key for key, _label in MAPS_SPECIAL_PASS_OPTIONS
+)
+
+
+def maps_stat_type_options() -> tuple[tuple[str, str], ...]:
+    return MAPS_STAT_TYPE_OPTIONS
+
+
+def maps_pass_options_for_type(stat_type: str) -> tuple[tuple[str, str], ...]:
+    if str(stat_type) == "special":
+        return MAPS_SPECIAL_PASS_OPTIONS
+    return MAPS_REGULAR_PASS_OPTIONS
+
+
+def maps_pass_type_label(filter_key: str) -> str:
+    return MAPS_PASS_TYPE_LABELS.get(str(filter_key), str(filter_key))
+
+
+def is_maps_special_pass(filter_key: str) -> bool:
+    return str(filter_key) in MAPS_SPECIAL_PASS_TYPE_KEYS
+
+
+def filter_passes_for_map(passes: pd.DataFrame, filter_key: str) -> pd.DataFrame:
+    """Return completed passes matching a Maps pass-type selection."""
+    work = _completed_pass_frame(passes)
+    if work.empty:
+        return work
+    key = str(filter_key or "").strip()
+    if key == "into_final_third":
+        x_end = work["x_end"].to_numpy(dtype=float)
+        return work.loc[x_end >= pe.FINAL_THIRD_LINE_X].copy()
+    if key == "into_box":
+        x_end = work["x_end"].to_numpy(dtype=float)
+        y_end = work["y_end"].to_numpy(dtype=float)
+        return work.loc[_in_penalty_box(x_end, y_end)].copy()
+    return filter_passes_by_special_type(work, key)
+
+
+def special_pass_count_key(filter_key: str) -> str:
+    return f"special_{filter_key}"
+
+
+def special_pass_per_game_key(filter_key: str) -> str:
+    return f"special_{filter_key}_p90"
+
+
+THREAT_ZONE_FILTER_KEYS: tuple[str, ...] = ("final_third", "in_box", "from_deep")
+
+
+def threat_zone_count_key(filter_key: str) -> str:
+    return f"threat_{filter_key}_passes"
+
+
+def threat_zone_per_game_key(filter_key: str) -> str:
+    return f"threat_{filter_key}_p90"
+
+
+def _completed_pass_frame(passes: pd.DataFrame) -> pd.DataFrame:
+    if passes is None or passes.empty:
+        return pd.DataFrame()
+    mask = passes["is_won"] & passes["has_end"] if "is_won" in passes.columns else passes["has_end"]
+    return passes[mask].copy()
+
+
+def compute_special_pass_masks(scored: pd.DataFrame) -> dict[str, np.ndarray]:
+    """Boolean masks for each special-pass category on completed passes."""
+    n = len(scored)
+    empty = np.zeros(n, dtype=bool)
+    if scored is None or scored.empty:
+        return {key: empty.copy() for key in SPECIAL_PASS_MAP_FILTER_KEYS}
+
+    x_start = scored["x_start"].to_numpy(dtype=float)
+    y_start = scored["y_start"].to_numpy(dtype=float)
+    x_end = scored["x_end"].to_numpy(dtype=float)
+    y_end = scored["y_end"].to_numpy(dtype=float)
+    dist = scored["pass_distance"].to_numpy(dtype=float)
+    dx = x_end - x_start
+    dy = y_end - y_start
+
+    start_zone = _zone_x(x_start)
+    end_zone = _zone_x(x_end)
+    long_pass = _is_long_pass(scored, dist)
+    lateral_start = _is_lateral_corridor(y_start)
+    lateral_end = _is_lateral_corridor(y_end)
+    in_box = _in_penalty_box(x_end, y_end)
+
+    return {
+        "progressive": pe._progressive_wyscout_vec(x_start, y_start, x_end, y_end),
+        "diagonal_long": (
+            long_pass
+            & (x_start <= DEF_X_MAX)
+            & (x_end >= FINAL_X_MIN)
+            & lateral_end
+            & _is_diagonal_long_pass(y_start, y_end)
+        ),
+        "line_break": (
+            _line_break_origin_corridor(y_start)
+            & _is_central_corridor(y_end)
+            & (x_end > x_start)
+            & _line_break_distance_ok(x_start, dist)
+            & _is_forward_angle(dx, dy, max_angle_deg=LINE_BREAK_FORWARD_ANGLE_DEG)
+        ),
+        "inversion": long_pass & _is_left_right_inversion(y_start, y_end),
+        "cross": (
+            lateral_start
+            & (x_start >= FINAL_X_MIN)
+            & (x_start < CROSS_MAX_START_X)
+            & in_box
+            & (dist >= CROSS_DIST_MIN_M)
+            & (np.abs(dy) >= CROSS_LATERAL_DELTA_MIN_M)
+        ),
+        "from_deep": (
+            (start_zone == "def")
+            & (end_zone == "att")
+            & (dist >= FROM_DEEP_DIST_MIN_M)
+        ),
+        "final_third": start_zone == "att",
+        "in_box": in_box,
+    }
+
+
+def filter_passes_by_special_type(passes: pd.DataFrame, filter_key: str) -> pd.DataFrame:
+    """Return completed passes matching a special-pass map filter."""
+    work = _completed_pass_frame(passes)
+    if work.empty:
+        return work
+    key = str(filter_key or "").strip()
+    if key not in SPECIAL_PASS_MAP_FILTER_KEYS:
+        return work.iloc[0:0].copy()
+    masks = compute_special_pass_masks(work)
+    return work.loc[masks[key]].copy()
+
+
+def special_pass_map_label(filter_key: str) -> str:
+    return SPECIAL_PASS_MAP_FILTER_LABELS.get(str(filter_key), str(filter_key))
 
 
 def _sum_xp(mask: np.ndarray, xp: np.ndarray) -> float:
     if not mask.any():
         return 0.0
     return float(xp[mask].sum())
-
-
-def _mean_xp(mask: np.ndarray, xp: np.ndarray) -> float:
-    if not mask.any():
-        return 0.0
-    return float(xp[mask].mean())
-
-
-def _count_threats(mask: np.ndarray, threat: np.ndarray) -> int:
-    return int((mask & threat).sum())
 
 
 def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
@@ -95,76 +349,46 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
     )
     if "progress_ratio" not in scored.columns:
         scored["progress_ratio"] = xse._progress_ratio_series(scored)
-    pr = scored["progress_ratio"].to_numpy(dtype=float)
-    x_start = scored["x_start"].to_numpy(dtype=float)
-    y_start = scored["y_start"].to_numpy(dtype=float)
-    x_end = scored["x_end"].to_numpy(dtype=float)
-    y_end = scored["y_end"].to_numpy(dtype=float)
-    dist = scored["pass_distance"].to_numpy(dtype=float)
-
-    start_zone = _zone_x(x_start)
-    end_zone = _zone_x(x_end)
-    wide = (y_start < WIDE_Y_MAX) | (y_start > WIDE_Y_MIN)
-    central = ~wide
-
-    prog = pr > 0
-    forward = pr > 0.15
-    static = pr <= 0
 
     xp_total = float(xp.sum())
-    xp_prog = _sum_xp(prog, xp)
-    progress_m = np.maximum(
-        scored["x_end"].to_numpy(dtype=float) - scored["x_start"].to_numpy(dtype=float),
-        0.0,
-    )
+    masks = compute_special_pass_masks(scored)
 
     out: dict[str, float | int] = dict(base)
+    for sp_key in SPECIAL_PASS_COUNT_KEYS:
+        out[special_pass_count_key(sp_key)] = int(masks[sp_key].sum())
+    final_third_count = int(masks["final_third"].sum())
     out.update({
-        "xp_prog_total": xp_prog,
-        "xp_static_total": _sum_xp(static, xp),
-        "xp_prog_share": xp_prog / xp_total if xp_total > 0 else 0.0,
-        "xp_threat_forward": _count_threats(forward, threat),
-        "xp_prog_efficiency": xp_prog / progress_m.sum() if progress_m.sum() > 0 else 0.0,
-        "xp_total_def": _sum_xp(start_zone == "def", xp),
-        "xp_total_mid": _sum_xp(start_zone == "mid", xp),
-        "xp_total_att": _sum_xp(start_zone == "att", xp),
-        "xp_threat_def": _count_threats(start_zone == "def", threat),
-        "xp_threat_mid": _count_threats(start_zone == "mid", threat),
-        "xp_threat_att": _count_threats(start_zone == "att", threat),
-        "xp_final_third_share": _sum_xp(start_zone == "att", xp) / xp_total if xp_total > 0 else 0.0,
-        "xp_from_deep": _sum_xp(start_zone == "def", xp),
-        "xp_zone_lift_att_def": (
-            _mean_xp(start_zone == "att", xp) - _mean_xp(start_zone == "def", xp)
+        "xp_diagonal_long_total": _sum_xp(masks["diagonal_long"], xp),
+        "xp_line_break_total": _sum_xp(masks["line_break"], xp),
+        "xp_inversion_total": _sum_xp(masks["inversion"], xp),
+        "xp_cross_total": _sum_xp(masks["cross"], xp),
+        "xp_final_third_share": _sum_xp(masks["final_third"], xp) / xp_total if xp_total > 0 else 0.0,
+        "xp_m4_per_pass_final_third": (
+            float(xp[masks["final_third"]].mean()) if final_third_count else 0.0
         ),
-        "xp_wide_total": _sum_xp(wide, xp),
-        "xp_central_total": _sum_xp(central, xp),
-        "xp_wide_share": _sum_xp(wide, xp) / xp_total if xp_total > 0 else 0.0,
-        "xp_switch_total": _sum_xp(wide & (scored["distance_band"].to_numpy() == "long"), xp),
-        "xp_line_break_total": _sum_xp((x_start < FINAL_THIRD_X) & (x_end > FINAL_THIRD_X), xp),
-        "xp_build_up": _sum_xp(start_zone == "def", xp),
-        "xp_finalization": _sum_xp(
-            (x_end >= PENALTY_X_MIN) & (y_end >= PENALTY_Y_MIN) & (y_end <= PENALTY_Y_MAX),
-            xp,
-        ),
+        "passes_final_third": final_third_count,
+        "xp_box_share": _sum_xp(masks["in_box"], xp) / xp_total if xp_total > 0 else 0.0,
+        "xp_from_deep": _sum_xp(masks["from_deep"], xp),
         "xp_max_pass": float(xp.max()) if n else 0.0,
         "xp_pass_std": float(xp.std()) if n > 1 else 0.0,
         "xp_pass_cv": float(xp.std() / xp.mean()) if n > 1 and xp.mean() > 0 else 0.0,
     })
-
-    if "isHome" in scored.columns:
-        home = scored["isHome"].astype(bool).to_numpy()
-        out["xp_home_total"] = _sum_xp(home, xp)
-        out["xp_away_total"] = _sum_xp(~home, xp)
-        out["xp_home_share"] = out["xp_home_total"] / xp_total if xp_total > 0 else 0.0
-    else:
-        out["xp_home_total"] = 0.0
-        out["xp_away_total"] = 0.0
-        out["xp_home_share"] = 0.0
+    for zone_key in THREAT_ZONE_FILTER_KEYS:
+        out[threat_zone_count_key(zone_key)] = int((masks[zone_key] & threat).sum())
 
     if RESIDUAL_COL in scored.columns:
         residual = scored[RESIDUAL_COL].to_numpy(dtype=float)
-        out["xp_residual_positive"] = float(np.maximum(residual, 0.0).sum())
-        out["xp_residual_negative"] = float(np.minimum(residual, 0.0).sum())
+        n = len(residual)
+        if n:
+            out["xp_residual_positive"] = float(np.maximum(residual, 0.0).sum()) / n
+            out["xp_residual_negative"] = float(np.minimum(residual, 0.0).sum()) / n
+            out["xp_residual_mean"] = float(residual.mean())
+            out["xp_residual_median"] = float(np.median(residual))
+        else:
+            out["xp_residual_positive"] = 0.0
+            out["xp_residual_negative"] = 0.0
+            out["xp_residual_mean"] = 0.0
+            out["xp_residual_median"] = 0.0
         out["xp_surprise_rate"] = float((residual > 0).mean())
         p75 = float(np.quantile(xp, 0.75)) if n else 0.0
         high_xp = xp >= p75
@@ -178,6 +402,8 @@ def compute_extended_xp_stats(grp: pd.DataFrame) -> dict[str, float | int]:
     else:
         out["xp_residual_positive"] = 0.0
         out["xp_residual_negative"] = 0.0
+        out["xp_residual_mean"] = 0.0
+        out["xp_residual_median"] = 0.0
         out["xp_surprise_rate"] = 0.0
         out["xp_threat_conversion"] = 0.0
         out["xp_threat_mean_xp"] = 0.0
@@ -201,67 +427,300 @@ def apply_per90_metrics(metrics: dict[str, float | int], minutes: float | None) 
     """Add per-90 variants in place."""
     if not minutes or float(minutes) <= 0:
         metrics["xp_per_90"] = 0.0
-        for key in ("def", "mid", "att"):
-            metrics[f"xp_threat_{key}_p90"] = 0.0
+        for sp_key in SPECIAL_PASS_COUNT_KEYS:
+            metrics[special_pass_per_game_key(sp_key)] = 0.0
+        for zone_key in THREAT_ZONE_FILTER_KEYS:
+            metrics[threat_zone_per_game_key(zone_key)] = 0.0
         return
     mins_f = float(minutes)
     factor = 90.0 / mins_f
     metrics["xp_per_90"] = float(metrics.get("xp_m4_total", 0.0)) * factor
-    threat_total = int(metrics.get("xp_m4_threat_passes", 0))
-    metrics["xp_m4_threat_passes_p90"] = float(threat_total) * factor
+    threat_count = int(metrics.get("xp_m4_threat_passes", 0))
+    metrics["threat_passes_p90"] = float(threat_count) * factor
+    metrics["xp_m4_threat_passes_p90"] = float(metrics.get("xp_m4_threat_xp_total", 0.0)) * factor
     for band in BANDS:
         band_threats = int(metrics.get(f"xp_m4_threat_{band}", 0))
         metrics[f"xp_m4_threat_{band}_p90"] = float(band_threats) * factor
-    for key in ("def", "mid", "att"):
-        threats = int(metrics.get(f"xp_threat_{key}", 0))
-        metrics[f"xp_threat_{key}_p90"] = float(threats) * factor
-    metrics["xp_threat_forward_p90"] = float(metrics.get("xp_threat_forward", 0)) * factor
+    for sp_key in SPECIAL_PASS_COUNT_KEYS:
+        count = int(metrics.get(special_pass_count_key(sp_key), 0))
+        metrics[special_pass_per_game_key(sp_key)] = float(count) * factor
+    for zone_key in THREAT_ZONE_FILTER_KEYS:
+        count = int(metrics.get(threat_zone_count_key(zone_key), 0))
+        metrics[threat_zone_per_game_key(zone_key)] = float(count) * factor
 
 
 # (section_title, metric_keys)
 XP_STATS_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Total", (
+    ("Totais", (
         "xp_per_90", "xp_m4_per_pass", "xp_m4_threat_rate",
+    )),
+    ("Special Stats", (
+        "special_diagonal_long_p90", "xp_diagonal_long_total",
+        "special_line_break_p90", "xp_line_break_total",
+        "special_inversion_p90", "xp_inversion_total",
+        "special_cross_p90", "xp_cross_total",
+        "xp_final_third_share", "threat_final_third_p90",
+        "xp_box_share", "threat_in_box_p90",
+        "xp_from_deep", "threat_from_deep_p90",
+    )),
+    ("Qualidade", (
+        "xp_residual_median", "xp_surprise_rate",
+    )),
+    ("Consistência", (
+        "xp_game_mean", "xp_game_std_adj_score", "xp_games_above_median_pct",
     )),
     (f"Short ({DISTANCE_BAND_LABELS['short']})", (
         "xp_m4_per_pass_short", "xp_m4_threat_rate_short",
     )),
-    (f"Medium ({DISTANCE_BAND_LABELS['medium']})", (
-        "xp_m4_per_pass_medium", "xp_m4_threat_rate_medium",
-    )),
     (f"Long ({DISTANCE_BAND_LABELS['long']})", (
         "xp_m4_per_pass_long", "xp_m4_threat_rate_long",
     )),
-    ("Progressão e direção", (
-        "xp_prog_total", "xp_static_total", "xp_prog_share",
-        "xp_threat_forward_p90", "xp_prog_efficiency",
+)
+
+# Player Analysis passing blocks
+XP_PLAYER_ANALYSIS_BLOCKS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Volume", (
+        "xp_per_90",
+        "threat_passes_p90",
     )),
-    ("Por zona do campo", (
-        "xp_total_def", "xp_total_mid", "xp_total_att",
-        "xp_threat_def_p90", "xp_threat_mid_p90", "xp_threat_att_p90",
-        "xp_final_third_share", "xp_from_deep", "xp_zone_lift_att_def",
+    ("Efetividade", (
+        "xp_m4_per_pass",
+        "xp_m4_per_threat_pass",
+        "xp_m4_threat_rate",
     )),
-    ("Canais e rotas", (
-        "xp_wide_total", "xp_central_total", "xp_wide_share",
-        "xp_switch_total", "xp_line_break_total",
-    )),
-    ("Qualidade e threat", (
-        "xp_residual_positive", "xp_residual_negative", "xp_surprise_rate",
-        "xp_threat_conversion", "xp_threat_mean_xp", "xp_threat_mean_residual",
-        "xp_m4_p90", "xp_max_pass",
+    ("Qualidade", (
+        "xp_residual_median",
+        "xp_surprise_rate",
     )),
     ("Consistência", (
-        "xp_game_mean", "xp_game_std", "xp_pass_cv",
-        "xp_games_above_median_pct", "xp_pass_std",
-    )),
-    ("Contexto", (
-        "xp_build_up", "xp_finalization",
-        "xp_home_total", "xp_away_total", "xp_home_share",
-    )),
-    ("Índices compostos", (
-        "xp_threat_index", "xp_progressive_index", "xp_creator_score", "xp_builder_score",
+        "xp_game_std_adj_score",
+        "xp_games_above_median_pct",
     )),
 )
+
+XP_COMPOSITE_INDEX_KEYS: tuple[str, ...] = (
+    "xp_builder_index",
+    "xp_creator_index",
+    "xp_progressor_index",
+    "xp_finisher_pass_index",
+    "xp_quality_index",
+    "xp_consistency_index",
+)
+
+XP_ARCHETYPE_RADAR_KEYS: tuple[str, ...] = (
+    "xp_archetype_builder_display",
+    "xp_archetype_creator_display",
+    "xp_archetype_progressor_display",
+    "xp_archetype_finisher_display",
+)
+
+XP_ARCHETYPE_RADAR_LABELS: dict[str, str] = {
+    "xp_archetype_builder_display": "Builder",
+    "xp_archetype_creator_display": "Creator",
+    "xp_archetype_progressor_display": "Progressor",
+    "xp_archetype_finisher_display": "Finisher-pass",
+}
+
+XP_PROFILE_BAR_KEYS: tuple[str, ...] = (
+    "xp_activity_display",
+    "xp_edge_display",
+    "xp_quality_display",
+    "xp_consistency_display",
+)
+
+XP_PROFILE_BAR_LABELS: dict[str, str] = {
+    "xp_activity_display": "Impacto Geral",
+    "xp_edge_display": "Impacto por ação",
+    "xp_quality_display": "Entrega vs Esperado",
+    "xp_consistency_display": "Consistência",
+}
+
+XP_PROFILE_BAR_METRICS: dict[str, tuple[str, ...]] = {
+    "xp_activity_display": (
+        "xp_per_90",
+        "threat_passes_p90",
+    ),
+    "xp_edge_display": (
+        "xp_m4_per_pass",
+        "xp_m4_per_threat_pass",
+    ),
+    "xp_quality_display": (
+        "xp_residual_median",
+        "xp_surprise_rate",
+    ),
+    "xp_consistency_display": (
+        "xp_game_std_adj_score",
+        "xp_games_above_median_pct",
+    ),
+}
+
+# Player Analysis compare panel.
+# Primary dimensions (more emphasis) = the four profile bars.
+XP_COMPARE_PROFILE_KEYS: tuple[str, ...] = (
+    "xp_activity_display",
+    "xp_edge_display",
+    "xp_quality_display",
+    "xp_consistency_display",
+)
+# Secondary metrics (less emphasis) = headline xP + progression stats.
+XP_COMPARE_METRIC_KEYS: tuple[str, ...] = (
+    "xp_per_90",
+    "xp_m4_per_pass",
+    "progressive_passes",
+    "final_third_passes",
+)
+XP_COMPARE_METRIC_LABELS: dict[str, str] = {
+    "xp_per_90": "xP (Por jogo)",
+    "xp_m4_per_pass": "xP/Passe",
+    "progressive_passes": "Progressivos",
+    "final_third_passes": "Terço Final",
+}
+
+XP_PROFILE_BAR_TOOLTIPS: dict[str, str] = {
+    "xp_activity_display": (
+        "Média do rank na posição de xP/jogo e ações de impacto/jogo — "
+        "com que frequência participa gerando valor."
+    ),
+    "xp_edge_display": (
+        "Média do rank na posição de xP/passe e xP/ação de impacto — "
+        "quanto valor cada ação rende."
+    ),
+    "xp_quality_display": (
+        "Média do rank na posição do ganho típico e da frequência de passes "
+        "acima do valor esperado — se entrega mais do que a situação previa."
+    ),
+    "xp_consistency_display": (
+        "Média do rank na posição da estabilidade entre jogos e da frequência "
+        "de jogos fortes — se mantém o nível de partida para partida."
+    ),
+}
+
+XP_PROFILE_ARCHETYPE_KEYS: tuple[str, ...] = (
+    "elite",
+    "criativo",
+    "seguranca",
+    "impacto",
+    "limitado",
+    "regular",
+)
+
+XP_PROFILE_ARCHETYPE_LABELS: dict[str, str] = {
+    "elite": "Elite",
+    "criativo": "Criativo",
+    "seguranca": "Segurança",
+    "impacto": "Impacto",
+    "limitado": "Limitado",
+    "regular": "Regular",
+}
+
+XP_PROFILE_ARCHETYPE_DESCRIPTIONS: dict[str, str] = {
+    "elite": (
+        "Perfil completo: volume, efetividade, qualidade e consistência acima da mediana "
+        "na posição."
+    ),
+    "criativo": (
+        "Especialista seletivo: efetividade e qualidade acima da mediana, com volume e "
+        "consistência abaixo."
+    ),
+    "seguranca": (
+        "Perfil de segurança: volume e consistência acima da mediana — confiável, discreto "
+        "e estável no passe."
+    ),
+    "impacto": (
+        "Produtor de alto impacto: volume, efetividade e qualidade acima da mediana, com "
+        "consistência mais volátil."
+    ),
+    "limitado": (
+        "Baixo impacto relativo na posição: três ou mais eixos do xP Profile abaixo da "
+        "mediana do grupo."
+    ),
+    "regular": (
+        "Perfil equilibrado na posição, sem encaixar claramente nos demais arquétipos."
+    ),
+}
+
+XP_PROFILE_ARCHETYPE_STYLES: dict[str, str] = {
+    "elite": "elite",
+    "criativo": "attack",
+    "seguranca": "build",
+    "impacto": "impacto",
+    "limitado": "reference",
+    "regular": "link",
+}
+
+XP_PROFILE_ARCHETYPE_ICONS: dict[str, str] = {
+    "elite": "fa-crown",
+    "criativo": "fa-wand-magic-sparkles",
+    "seguranca": "fa-shield-halved",
+    "impacto": "fa-bolt",
+    "limitado": "fa-arrow-trend-down",
+    "regular": "fa-equals",
+}
+
+XP_PROFILE_ARCHETYPE_FILTER_ALL = ""
+
+ACTIVITY_METRICS: tuple[str, ...] = (
+    "xp_per_90",
+    "threat_passes_p90",
+)
+EDGE_METRICS: tuple[str, ...] = (
+    "xp_m4_per_pass",
+    "xp_m4_per_threat_pass",
+)
+
+XP_PASS_RATING_FEATURES: tuple[str, ...] = (
+    "xp_m4_per_pass",
+    "xp_m4_per_threat_pass",
+    "xp_per_90",
+    "threat_passes_p90",
+    "xp_residual_median",
+    "xp_game_std_adj_score",
+)
+XP_PASS_RATING_TANH_SCALE = 1.25
+XP_PASS_RATING_TANH_AMPLITUDE = 1.15
+
+BUILDER_BASE_METRICS: tuple[str, ...] = (
+    "xp_line_break_total",
+    "special_line_break_p90",
+    "xp_m4_per_pass_short",
+    "xp_m4_threat_rate_short",
+)
+BUILDER_FB_METRICS: tuple[str, ...] = (
+    "xp_inversion_total",
+    "special_inversion_p90",
+)
+CREATOR_METRICS: tuple[str, ...] = (
+    "xp_final_third_share",
+    "threat_final_third_p90",
+    "xp_m4_per_pass_final_third",
+)
+PROGRESSOR_METRICS: tuple[str, ...] = (
+    "xp_diagonal_long_total",
+    "special_diagonal_long_p90",
+    "xp_from_deep",
+    "xp_m4_per_pass_long",
+    "xp_m4_threat_rate_long",
+)
+FINISHER_METRICS: tuple[str, ...] = (
+    "xp_box_share",
+    "threat_in_box_p90",
+    "xp_cross_total",
+    "special_cross_p90",
+)
+QUALITY_METRICS: tuple[str, ...] = (
+    "xp_residual_median",
+    "xp_surprise_rate",
+)
+CONSISTENCY_METRICS: tuple[str, ...] = (
+    "xp_game_std_adj_score",
+    "xp_games_above_median_pct",
+)
+CONSISTENCY_INVERT_METRICS: tuple[str, ...] = ()
+
+
+def iter_xp_player_analysis_blocks() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Yield (title, keys) for every Player Analysis passing block."""
+    return XP_PLAYER_ANALYSIS_BLOCKS
 
 
 def p20_pass_thresholds_by_group(
@@ -294,68 +753,256 @@ def iter_xp_stats_sections() -> tuple[tuple[str, tuple[str, ...]], ...]:
 
 XP_STATS_LABELS: dict[str, str] = {
     "xp_per_90": "xP (Per game)",
+    "threat_passes_p90": "Threat Passes (Per game)",
+    "xp_m4_total": "xP Total",
+    "xp_m4_threat_passes_p90": "xP Threat Passes (Per game)",
     "xp_m4_per_pass": "xP/Passe",
+    "xp_m4_per_threat_pass": "xP/Threat Pass",
     "xp_m4_threat_rate": "% Threat Passes",
     "xp_m4_per_pass_short": "xP/Passe",
-    "xp_m4_per_pass_medium": "xP/Passe",
     "xp_m4_per_pass_long": "xP/Passe",
     "xp_m4_threat_rate_short": "% Threat Passes",
-    "xp_m4_threat_rate_medium": "% Threat Passes",
     "xp_m4_threat_rate_long": "% Threat Passes",
     "xp_m4_threat_short_p90": "xP Threat Passes (Per game)",
-    "xp_m4_threat_medium_p90": "xP Threat Passes (Per game)",
     "xp_m4_threat_long_p90": "xP Threat Passes (Per game)",
     "passes_short": "Passes na faixa",
-    "passes_medium": "Passes na faixa",
     "passes_long": "Passes na faixa",
     "xp_m4_total_short": "xP Total (Short)",
     "xp_m4_threat_short_p90": "Threat p/game (Short)",
-    "xp_m4_total_medium": "xP Total (Medium)",
-    "xp_m4_threat_medium_p90": "Threat p/game (Medium)",
     "xp_m4_total_long": "xP Total (Long)",
     "xp_m4_threat_long_p90": "Threat p/game (Long)",
-    "xp_prog_total": "xP progressivo",
-    "xp_static_total": "xP estático/recuado",
-    "xp_prog_share": "% xP em progressão",
-    "xp_threat_forward_p90": "Threat forward p/game",
-    "xp_prog_efficiency": "Progress efficiency",
-    "xp_total_def": "xP terço defensivo",
-    "xp_total_mid": "xP terço médio",
-    "xp_total_att": "xP terço ofensivo",
-    "xp_threat_def_p90": "Threat p/game (Def)",
-    "xp_threat_mid_p90": "Threat p/game (Mid)",
-    "xp_threat_att_p90": "Threat p/game (Att)",
-    "xp_final_third_share": "% xP no terço final",
-    "xp_from_deep": "xP from deep",
-    "xp_zone_lift_att_def": "Zone lift (Att − Def)",
-    "xp_wide_total": "xP wide channels",
-    "xp_central_total": "xP central corridor",
-    "xp_wide_share": "% xP wide",
-    "xp_switch_total": "Switch xP (long wide)",
-    "xp_line_break_total": "Line-breaking xP",
-    "xp_residual_positive": "xP acima do esperado",
-    "xp_residual_negative": "xP abaixo do esperado",
-    "xp_surprise_rate": "Surprise rate",
+    "xp_diagonal_long_total": "Diagonal Longa (xP)",
+    "special_diagonal_long_p90": "Diagonal Longa (Per game)",
+    "xp_line_break_total": "Quebra Linha (xP)",
+    "special_line_break_p90": "Quebra Linha (Per game)",
+    "xp_inversion_total": "Inversões (xP)",
+    "special_inversion_p90": "Inversões (Per game)",
+    "xp_cross_total": "Cruzamentos (xP)",
+    "special_cross_p90": "Cruzamentos (Per game)",
+    "xp_final_third_share": "%xP - Terço Final",
+    "threat_final_third_p90": "Threat Passes - Terço Final",
+    "xp_box_share": "%xP - Área",
+    "threat_in_box_p90": "Threat Passes - Área",
+    "xp_from_deep": "xP Deep",
+    "threat_from_deep_p90": "Threat Passes - Deep",
+    "special_final_third_p90": "Terço final (Per game)",
+    "special_in_box_p90": "Na área (Per game)",
+    "special_from_deep_p90": "From deep (Per game)",
+    "xp_residual_mean": "Resíduo médio/Passe",
+    "xp_residual_median": "Resíduo mediano/Passe",
+    "xp_residual_positive": "xP acima do esperado/Passe",
+    "xp_residual_negative": "xP abaixo do esperado / passe",
+    "xp_surprise_rate": "Surprise Rate",
     "xp_threat_conversion": "Threat conversion",
     "xp_threat_mean_xp": "Mean threat xP",
     "xp_threat_mean_residual": "Mean threat residual",
     "xp_m4_p90": "xP P90 (passe)",
     "xp_max_pass": "Max single-pass xP",
-    "xp_game_mean": "xP médio por jogo",
-    "xp_game_std": "Desvio xP entre jogos",
+    "xp_game_mean": "xP médio (Per game)",
+    "xp_game_std": "Desvio xP",
+    "xp_game_std_adj": "Desvio xP ajustado",
+    "xp_game_std_adj_score": "Estabilidade ajustada",
     "xp_pass_cv": "xP CV (passes)",
-    "xp_games_above_median_pct": "% jogos acima da mediana",
+    "xp_games_above_median_pct": "% Jogos acima da mediana",
     "xp_pass_std": "Desvio xP (passes)",
-    "xp_build_up": "xP in build-up",
-    "xp_finalization": "xP in finalization",
-    "xp_home_total": "xP em casa",
-    "xp_away_total": "xP fora",
-    "xp_home_share": "% xP em casa",
-    "xp_threat_index": "xP Threat Index",
-    "xp_progressive_index": "Progressive xP Index",
-    "xp_creator_score": "Creator score",
-    "xp_builder_score": "Builder score",
+    "xp_builder_index": "Builder",
+    "xp_creator_index": "Creator",
+    "xp_progressor_index": "Progressor",
+    "xp_finisher_pass_index": "Finisher-pass",
+    "xp_quality_index": "Quality",
+    "xp_consistency_index": "Consistency",
+    "xp_m4_per_pass_final_third": "xP/Passe Terço Final",
+    "xp_archetype_creator_display": "Creator",
+    "xp_archetype_progressor_display": "Progressor",
+    "xp_archetype_finisher_display": "Finisher-pass",
+    "xp_quality_display": "Quality",
+    "xp_consistency_display": "Consistency",
 }
+
+XP_PA_LABELS: dict[str, str] = {
+    "xp_per_90": "xP / jogo",
+    "threat_passes_p90": "Threats / jogo",
+    "xp_m4_per_pass": "xP / passe",
+    "xp_m4_per_threat_pass": "xP / threat",
+    "xp_m4_threat_rate": "% threats",
+    "xp_residual_median": "Resíduo mediano",
+    "xp_surprise_rate": "% acima do esperado",
+    "xp_game_std_adj_score": "Estabilidade",
+    "xp_games_above_median_pct": "% jogos fortes",
+}
+
+XP_PA_TOOLTIPS: dict[str, str] = {
+    "xp_per_90": "Volume de xP gerado por passe, normalizado por 90 minutos.",
+    "threat_passes_p90": "Quantidade de passes threat (alto potencial ofensivo) por jogo.",
+    "xp_m4_per_pass": "xP médio por passe — mede a eficiência de cada entrega.",
+    "xp_m4_per_threat_pass": "xP médio apenas nos passes classificados como threat.",
+    "xp_m4_threat_rate": "Percentual de passes que são threat no total de passes.",
+    "xp_residual_median": "Mediana do resíduo (xP real − esperado) por passe, ×100. Valores positivos indicam passes melhores que o modelo prevê.",
+    "xp_surprise_rate": "Percentual de passes com resíduo positivo — passes que superam a expectativa do modelo.",
+    "xp_game_std_adj_score": "Estabilidade de entrega entre jogos, ajustada pelo nível médio de xP do jogador.",
+    "xp_games_above_median_pct": "Percentual de jogos em que o xP do jogador ficou acima da própria mediana.",
+}
+
+def iter_stats_metric_options() -> tuple[tuple[str, str], ...]:
+    """Ordered (metric_key, label) pairs for every Stats tab metric."""
+    seen: dict[str, str] = {}
+    for _title, keys in iter_xp_stats_sections():
+        for key in keys:
+            if key not in seen:
+                seen[key] = stats_metric_label(key)
+    return tuple(seen.items())
+
+
+# Dispersão (scatter) — analyst-facing metrics split into two stat types.
+# Regular Stats: card stats minus the completion (% acerto) ones.
+SCATTER_REGULAR_METRIC_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("passes_total", "Passes / jogo"),
+    ("long_balls", "Passes longos / jogo"),
+    ("progressive_passes", "Passes progressivos / jogo"),
+    ("final_third_passes", "Passes para terço final / jogo"),
+    ("passes_to_box", "Passes para área / jogo"),
+    ("key_passes", "Key passes / jogo"),
+    ("pass_mean_distance", "Distância média do passe"),
+)
+# Special Stat: special passes plus the xP metrics.
+SCATTER_SPECIAL_METRIC_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("xp_per_90", "xP / jogo"),
+    ("threat_passes_p90", "Ações de impacto / jogo"),
+    ("xp_m4_per_pass", "xP / passe"),
+    ("xp_m4_per_threat_pass", "xP / ação de impacto"),
+    ("xp_residual_median", "Resíduo mediano"),
+    ("xp_game_std_adj_score", "Estabilidade"),
+    ("special_diagonal_long_p90", "Diagonais longas / jogo"),
+    ("special_line_break_p90", "Passes quebra-linha / jogo"),
+    ("special_inversion_p90", "Inversões / jogo"),
+    ("special_cross_p90", "Cruzamentos / jogo"),
+)
+SCATTER_STAT_TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("regular", "Regular Stats"),
+    ("special", "Special Stat"),
+)
+SCATTER_METRIC_OPTIONS: tuple[tuple[str, str], ...] = (
+    *SCATTER_REGULAR_METRIC_OPTIONS,
+    *SCATTER_SPECIAL_METRIC_OPTIONS,
+)
+SCATTER_METRIC_LABELS: dict[str, str] = dict(SCATTER_METRIC_OPTIONS)
+# Scatter axes that come from the special-pass family (flagged in the UI).
+SCATTER_SPECIAL_METRIC_KEYS: frozenset[str] = frozenset({
+    "special_diagonal_long_p90",
+    "special_line_break_p90",
+    "special_inversion_p90",
+    "special_cross_p90",
+})
+
+
+def iter_scatter_metric_options() -> tuple[tuple[str, str], ...]:
+    return SCATTER_METRIC_OPTIONS
+
+
+def scatter_stat_type_options() -> tuple[tuple[str, str], ...]:
+    return SCATTER_STAT_TYPE_OPTIONS
+
+
+def scatter_metric_options_for_type(stat_type: str) -> tuple[tuple[str, str], ...]:
+    if str(stat_type) == "special":
+        return SCATTER_SPECIAL_METRIC_OPTIONS
+    return SCATTER_REGULAR_METRIC_OPTIONS
+
+
+def scatter_metric_label(key: str) -> str:
+    return SCATTER_METRIC_LABELS.get(key, stats_metric_label(key))
+
+
+def is_scatter_special_metric(key: str) -> bool:
+    return str(key) in SCATTER_SPECIAL_METRIC_KEYS
+
+
+SCATTER_BAND_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("total", "Total"),
+    ("short", f"Short ({DISTANCE_BAND_LABELS['short']})"),
+    ("long", f"Long ({DISTANCE_BAND_LABELS['long']})"),
+)
+SCATTER_BANDED_BASE_KEYS: frozenset[str] = frozenset({
+    "xp_m4_total",
+    "xp_m4_per_pass",
+    "xp_m4_threat_passes_p90",
+    "xp_m4_threat_rate",
+})
+SCATTER_EXTRA_BASE_KEYS: tuple[tuple[str, str], ...] = (
+    ("xp_m4_total", "xP Total"),
+    ("xp_m4_threat_passes_p90", "xP Threat Passes (Per game)"),
+)
+
+
+def _is_scatter_band_variant_key(key: str) -> bool:
+    if key.endswith(("_short", "_long")):
+        return True
+    return key in {
+        "xp_m4_threat_short_p90",
+        "xp_m4_threat_long_p90",
+    }
+
+
+def iter_scatter_base_metric_options() -> tuple[tuple[str, str], ...]:
+    """Base Stats metrics for scatter axes (band chosen separately)."""
+    seen: dict[str, str] = {}
+    for key, label in iter_stats_metric_options():
+        if _is_scatter_band_variant_key(key):
+            continue
+        seen[key] = label
+    for key, label in SCATTER_EXTRA_BASE_KEYS:
+        seen.setdefault(key, label)
+    return tuple(seen.items())
+
+
+def resolve_scatter_metric_key(base_key: str, band: str) -> str:
+    """Map base metric + distance band to the player-profile column key."""
+    if band == "total" or base_key not in SCATTER_BANDED_BASE_KEYS:
+        return base_key
+    if base_key == "xp_m4_threat_passes_p90":
+        return f"xp_m4_threat_{band}_p90"
+    return f"{base_key}_{band}"
+
+
+def scatter_axis_label(base_key: str, band: str) -> str:
+    base_label = stats_metric_label(base_key)
+    if band == "total" or base_key not in SCATTER_BANDED_BASE_KEYS:
+        return base_label
+    band_label = DISTANCE_BAND_LABELS.get(band, band)
+    return f"{base_label} · {band_label}"
+
+
+THREAT_PASS_MAP_FILTERS: tuple[tuple[str, str], ...] = (
+    ("all", "Total"),
+    ("short", f"Short ({DISTANCE_BAND_LABELS['short']})"),
+    ("long", f"Long ({DISTANCE_BAND_LABELS['long']})"),
+)
+THREAT_PASS_MAP_FILTER_KEYS: tuple[str, ...] = tuple(key for key, _label in THREAT_PASS_MAP_FILTERS)
+THREAT_PASS_MAP_FILTER_LABELS: dict[str, str] = dict(THREAT_PASS_MAP_FILTERS)
+
+
+def threat_pass_map_label(filter_key: str) -> str:
+    return THREAT_PASS_MAP_FILTER_LABELS.get(str(filter_key), str(filter_key))
+
+
+def filter_passes_by_threat_type(passes: pd.DataFrame, filter_key: str) -> pd.DataFrame:
+    """Return completed xP threat passes, optionally filtered by distance band."""
+    work = _completed_pass_frame(passes)
+    if work.empty:
+        return work
+    if THREAT_COL not in work.columns:
+        return work.iloc[0:0].copy()
+    work = work[work[THREAT_COL]].copy()
+    band = str(filter_key or "all").strip()
+    if band in {"", "all"}:
+        return work
+    if band not in BANDS:
+        return work.iloc[0:0].copy()
+    if "distance_band" not in work.columns:
+        work = work.copy()
+        work["distance_band"] = xse._distance_band_series(work["pass_distance"])
+    return work[work["distance_band"].astype(str) == band].copy()
+
 
 XP_STATS_RANK_METRICS: tuple[str, ...] = tuple(
     dict.fromkeys(
@@ -363,6 +1010,14 @@ XP_STATS_RANK_METRICS: tuple[str, ...] = tuple(
         for _title, keys in iter_xp_stats_sections()
         for key in keys
     )
+)
+
+XP_PLAYER_ANALYSIS_RANK_METRICS: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        key
+        for _title, keys in XP_PLAYER_ANALYSIS_BLOCKS
+        for key in keys
+    ) | dict.fromkeys(XP_COMPOSITE_INDEX_KEYS)
 )
 
 
@@ -417,8 +1072,143 @@ def _apply_volume_grade_penalty(grade: str, volume_rank_pct: float) -> str:
     return _grade_from_tier_value(float(max(1, tier)))
 
 
+def _series_or_zero(df: pd.DataFrame, col: str) -> pd.Series:
+    if col in df.columns:
+        return df[col].astype(float)
+    return pd.Series(0.0, index=df.index)
+
+
+def _mean_z_columns(
+    df: pd.DataFrame,
+    cols: tuple[str, ...],
+    *,
+    invert: tuple[str, ...] = (),
+) -> pd.Series:
+    if not cols:
+        return pd.Series(0.0, index=df.index)
+    parts: list[pd.Series] = []
+    for col in cols:
+        z = _zscore(_series_or_zero(df, col))
+        if col in invert:
+            z = -z
+        parts.append(z)
+    return sum(parts) / len(parts)
+
+
+def _attach_index_display_scores(
+    rows: list[dict],
+    raw_key: str,
+    display_key: str,
+    composite: pd.Series,
+) -> None:
+    import passes_engine as pe
+
+    pool_size = len(rows)
+    ranks = _rank_descending(composite)
+    for i, row in enumerate(rows):
+        row[raw_key] = float(composite.iloc[i])
+        rank = int(ranks.iloc[i])
+        row[f"{raw_key}_rank_in_group"] = rank
+        row[f"{raw_key}_rank_pool_in_group"] = pool_size
+        row[display_key] = float(pe.rank_to_display_score(rank, pool_size))
+
+
+def _attach_median_rank_display_scores(
+    rows: list[dict],
+    cols: tuple[str, ...],
+    raw_key: str,
+    display_key: str,
+) -> None:
+    """Rank each metric within position, take the median rank, then map to 3–9 display."""
+    if not rows or not cols:
+        return
+    df = pd.DataFrame(rows)
+    pool_size = len(rows)
+    rank_frame = pd.concat(
+        [_rank_descending(_series_or_zero(df, col).astype(float)) for col in cols],
+        axis=1,
+    )
+    median_rank = rank_frame.median(axis=1).astype(float)
+    composite = float(pool_size + 1) - median_rank
+    _attach_index_display_scores(rows, raw_key, display_key, composite)
+
+
+def _attach_game_std_adjusted(rows: list[dict]) -> None:
+    """Residual of game-level xP std after regressing on game mean (within position)."""
+    if not rows:
+        return
+    means = np.array([float(r.get("xp_game_mean") or 0.0) for r in rows], dtype=float)
+    stds = np.array([float(r.get("xp_game_std") or 0.0) for r in rows], dtype=float)
+    if len(rows) < 3 or float(np.std(means)) <= 1e-12:
+        for row in rows:
+            row["xp_game_std_adj"] = 0.0
+            row["xp_game_std_adj_score"] = 0.0
+        return
+    slope, intercept = np.polyfit(means, stds, 1)
+    adjusted = stds - (slope * means + intercept)
+    for row, val in zip(rows, adjusted):
+        row["xp_game_std_adj"] = float(val)
+        row["xp_game_std_adj_score"] = float(-val)
+
+
+def _xp_profile_axis_medians(rows: list[dict]) -> dict[str, float]:
+    medians: dict[str, float] = {}
+    for key in XP_PROFILE_BAR_KEYS:
+        values = [
+            float(row[key])
+            for row in rows
+            if row.get(key) is not None and np.isfinite(float(row[key]))
+        ]
+        medians[key] = float(np.median(values)) if values else 6.0
+    return medians
+
+
+def classify_xp_profile_archetype(
+    row: dict,
+    medians: dict[str, float],
+) -> str:
+    """Classify a player into one of six xP profile archetypes (within position)."""
+    scores: dict[str, float] = {}
+    for key in XP_PROFILE_BAR_KEYS:
+        raw = row.get(key)
+        if raw is None or not np.isfinite(float(raw)):
+            return "regular"
+        scores[key] = float(raw)
+
+    below = {key: scores[key] < medians[key] for key in XP_PROFILE_BAR_KEYS}
+    above = {key: scores[key] > medians[key] for key in XP_PROFILE_BAR_KEYS}
+
+    volume = "xp_activity_display"
+    effectiveness = "xp_edge_display"
+    quality = "xp_quality_display"
+    consistency = "xp_consistency_display"
+
+    if above[volume] and above[effectiveness] and above[quality] and above[consistency]:
+        return "elite"
+    if above[effectiveness] and above[quality] and below[consistency] and below[volume]:
+        return "criativo"
+    if above[volume] and above[consistency]:
+        return "seguranca"
+    if above[volume] and above[effectiveness] and above[quality]:
+        return "impacto"
+    if sum(below.values()) >= 3:
+        return "limitado"
+    return "regular"
+
+
+def _attach_xp_profile_archetypes(rows: list[dict]) -> None:
+    if not rows:
+        return
+    medians = _xp_profile_axis_medians(rows)
+    for row in rows:
+        archetype = classify_xp_profile_archetype(row, medians)
+        row["xp_profile_archetype"] = archetype
+        row["xp_profile_archetype_label"] = XP_PROFILE_ARCHETYPE_LABELS[archetype]
+        row["xp_profile_archetype_description"] = XP_PROFILE_ARCHETYPE_DESCRIPTIONS[archetype]
+
+
 def attach_composite_indices(players: list[dict]) -> None:
-    """Within-position z-score composites."""
+    """Within-position z-score composites for xP archetype radar and profile bars."""
     if not players:
         return
     pools: dict[str, list[dict]] = {}
@@ -427,21 +1217,150 @@ def attach_composite_indices(players: list[dict]) -> None:
         pools.setdefault(group, []).append(player)
 
     for rows in pools.values():
+        _attach_game_std_adjusted(rows)
         df = pd.DataFrame(rows)
-        z_total = _zscore(df["xp_m4_total"].astype(float))
-        z_threat_p90 = _zscore(df["xp_m4_threat_passes_p90"].astype(float))
-        z_threat_rate = _zscore(df["xp_m4_threat_rate"].astype(float))
-        z_prog = _zscore(df.get("xp_prog_total", pd.Series(0.0, index=df.index)).astype(float))
-        z_long_threat = _zscore(df.get("xp_m4_threat_long_p90", pd.Series(0.0, index=df.index)).astype(float))
-        z_deep = _zscore(df.get("xp_from_deep", pd.Series(0.0, index=df.index)).astype(float))
-        z_att = _zscore(df.get("xp_total_att", pd.Series(0.0, index=df.index)).astype(float))
-        z_short_prog = _zscore(df.get("xp_m4_total_short", pd.Series(0.0, index=df.index)).astype(float))
+        position_group = str(rows[0].get("position_group") or "")
+        builder_cols = list(BUILDER_BASE_METRICS)
+        if position_group == "fullbacks":
+            builder_cols.extend(BUILDER_FB_METRICS)
 
-        for i, row in enumerate(rows):
-            row["xp_threat_index"] = float(z_total.iloc[i] + z_threat_p90.iloc[i] + z_threat_rate.iloc[i])
-            row["xp_progressive_index"] = float(z_prog.iloc[i] + z_long_threat.iloc[i])
-            row["xp_creator_score"] = float(z_att.iloc[i] + z_threat_p90.iloc[i] + z_long_threat.iloc[i])
-            row["xp_builder_score"] = float(z_deep.iloc[i] + z_short_prog.iloc[i])
+        composites = {
+            "xp_builder_index": _mean_z_columns(df, tuple(builder_cols)),
+            "xp_creator_index": _mean_z_columns(df, CREATOR_METRICS),
+            "xp_progressor_index": _mean_z_columns(df, PROGRESSOR_METRICS),
+            "xp_finisher_pass_index": _mean_z_columns(df, FINISHER_METRICS),
+        }
+        display_map = {
+            "xp_builder_index": "xp_archetype_builder_display",
+            "xp_creator_index": "xp_archetype_creator_display",
+            "xp_progressor_index": "xp_archetype_progressor_display",
+            "xp_finisher_pass_index": "xp_archetype_finisher_display",
+        }
+        for raw_key, composite in composites.items():
+            _attach_index_display_scores(rows, raw_key, display_map[raw_key], composite)
+
+        # Profile bars: average of within-position ranks of their component metrics.
+        _attach_median_rank_display_scores(
+            rows, ACTIVITY_METRICS, "xp_activity_index", "xp_activity_display"
+        )
+        _attach_median_rank_display_scores(
+            rows, EDGE_METRICS, "xp_edge_index", "xp_edge_display"
+        )
+        _attach_median_rank_display_scores(
+            rows, QUALITY_METRICS, "xp_quality_index", "xp_quality_display"
+        )
+        _attach_median_rank_display_scores(
+            rows, CONSISTENCY_METRICS, "xp_consistency_index", "xp_consistency_display"
+        )
+        _attach_xp_profile_archetypes(rows)
+
+
+def _xp_pass_rating_shrink_sample(feature_key: str, player: dict) -> float:
+    if feature_key in {"xp_per_90", "threat_passes_p90"}:
+        return float(player.get("minutes") or 0.0)
+    return float(player.get("passes_completed") or 0.0)
+
+
+def _xp_pass_rating_shrink_k(feature_key: str) -> float:
+    if feature_key in {"xp_per_90", "threat_passes_p90"}:
+        return float(pe.SHRINKAGE_MINUTES_K)
+    return float(pe.SHRINKAGE_PASS_K)
+
+
+def _xp_pass_rating_shrink_value(
+    feature_key: str,
+    player: dict,
+    pool_values: list[float],
+) -> float:
+    clean = [float(v) for v in pool_values if v is not None and np.isfinite(float(v))]
+    prior = float(np.mean(clean)) if clean else 0.0
+    raw = player.get(feature_key)
+    sample = _xp_pass_rating_shrink_sample(feature_key, player)
+    if raw is None or sample <= 0:
+        return prior
+    weight = sample / (sample + _xp_pass_rating_shrink_k(feature_key))
+    return weight * float(raw) + (1.0 - weight) * prior
+
+
+def _xp_pass_rating_tanh_display(z_score: float) -> float:
+    return float(
+        pe.RATING_DISPLAY_MID
+        + XP_PASS_RATING_TANH_AMPLITUDE * np.tanh(float(z_score) / XP_PASS_RATING_TANH_SCALE)
+    )
+
+
+def attach_xp_pass_ratings(players: list[dict]) -> None:
+    """Attach compressed xP pass rating (6-axis PCA + pass shrinkage + confidence).
+
+    PC1 combines within-position z-scores of:
+    xP/passe, xP/threat, xP/jogo, threats/jogo, resíduo mediano and estabilidade ajustada.
+    Raw metrics are shrunk toward the position mean using passes (or minutes for p90 metrics).
+    """
+    if not players:
+        return
+
+    from sklearn.decomposition import PCA
+
+    pools: dict[str, list[dict]] = {}
+    for player in players:
+        group = str(player.get("position_group") or "CM")
+        pools.setdefault(group, []).append(player)
+
+    for rows in pools.values():
+        pool_size = len(rows)
+        if pool_size == 0:
+            continue
+
+        passes = [float(p.get("passes_completed") or 0.0) for p in rows]
+        p25_passes = float(np.percentile(passes, 25)) if passes else float(pe.RATING_CONFIDENCE_PASSES)
+        p25_passes = max(p25_passes, 1.0)
+
+        shrunk_by_feature: dict[str, list[float]] = {}
+        for feature_key in XP_PASS_RATING_FEATURES:
+            pool_values = [float(p.get(feature_key) or 0.0) for p in rows]
+            shrunk_by_feature[feature_key] = [
+                _xp_pass_rating_shrink_value(feature_key, player, pool_values)
+                for player in rows
+            ]
+
+        feature_frame = pd.DataFrame(shrunk_by_feature)
+        z_frame = feature_frame.apply(_zscore)
+        if pool_size >= 8:
+            pca = PCA(n_components=1, random_state=42)
+            pca_scores = pca.fit_transform(z_frame.to_numpy(dtype=float)).ravel().tolist()
+        else:
+            pca_scores = z_frame.mean(axis=1).astype(float).tolist()
+
+        raw_displays = [_xp_pass_rating_tanh_display(score) for score in pca_scores]
+        adjusted_displays: list[float] = []
+        for player, raw_display, pca_z in zip(rows, raw_displays, pca_scores):
+            player["position_p25_passes"] = round(p25_passes, 1)
+            confidence = pe._rating_confidence(player)
+            adjusted, uncertainty = pe._apply_rating_confidence(raw_display, confidence)
+            adjusted_displays.append(adjusted)
+            player["xp_pass_rating_raw_display"] = round(raw_display, 2)
+            player["xp_pass_rating_confidence"] = round(confidence, 4)
+            player["xp_pass_rating_uncertainty"] = round(uncertainty, 2)
+            player["xp_pass_rating"] = round(adjusted / 10.0, 4)
+            player["xp_pass_rating_pca_z"] = round(float(pca_z), 4)
+
+        ranked = sorted(
+            zip(rows, adjusted_displays),
+            key=lambda item: float(item[1]),
+            reverse=True,
+        )
+        for rank, (row, _display) in enumerate(ranked, start=1):
+            row["xp_pass_rating_rank_in_group"] = rank
+            row["xp_pass_rating_rank_pool_in_group"] = pool_size
+            metric_ranks = row.get("metric_ranks")
+            if not isinstance(metric_ranks, dict):
+                metric_ranks = {}
+            metric_ranks["xp_pass_rating"] = {
+                "rank": rank,
+                "total": pool_size,
+                "value": row.get("xp_pass_rating"),
+            }
+            row["metric_ranks"] = metric_ranks
 
 
 def attach_distance_indices(players: list[dict]) -> None:
@@ -556,14 +1475,17 @@ def distance_index_grade_for_profile(profile: dict, band: str) -> str | None:
 
 
 def attach_all_stats_ranks(players: list[dict]) -> None:
-    """Rank every stats-tab metric within position group."""
+    """Rank every stats-tab and Player Analysis metric within position group."""
     pools: dict[str, list[dict]] = {}
     for player in players:
         group = str(player.get("position_group") or "CM")
         pools.setdefault(group, []).append(player)
+    rank_metrics = tuple(
+        dict.fromkeys((*XP_STATS_RANK_METRICS, *XP_PLAYER_ANALYSIS_RANK_METRICS))
+    )
     for rows in pools.values():
         pool_size = len(rows)
-        for metric in XP_STATS_RANK_METRICS:
+        for metric in rank_metrics:
             if metric.startswith("xp_dist_index_"):
                 continue
             rows.sort(key=lambda row: float(row.get(metric) or 0.0), reverse=True)
@@ -590,6 +1512,35 @@ def stats_metric_label(key: str) -> str:
     return XP_STATS_LABELS.get(key, key)
 
 
+def pa_stats_metric_label(key: str) -> str:
+    return XP_PA_LABELS.get(key, stats_metric_label(key))
+
+
+def pa_stats_metric_tooltip(key: str) -> str:
+    return XP_PA_TOOLTIPS.get(key, "")
+
+
+def _format_residual_display(value: float) -> str:
+    return f"{100.0 * value:+.1f}"
+
+
+def format_pa_stats_value(key: str, value: float | int | None) -> str:
+    if value is None:
+        return "—"
+    val = float(value)
+    if key in {"xp_m4_threat_rate", "xp_surprise_rate", "xp_games_above_median_pct"}:
+        return f"{100 * val:.1f}%"
+    if key.startswith("xp_residual"):
+        return _format_residual_display(val)
+    if key in {"xp_game_std_adj", "xp_game_std_adj_score"}:
+        return f"{val:+.2f}"
+    if key in {"xp_m4_per_pass", "xp_m4_per_threat_pass"}:
+        return f"{val:.2f}"
+    if key in {"xp_per_90", "threat_passes_p90"}:
+        return f"{val:.1f}"
+    return format_stats_value(key, value)
+
+
 def format_stats_value(key: str, value: float | int | None) -> str:
     if value is None:
         return "—"
@@ -602,20 +1553,37 @@ def format_stats_value(key: str, value: float | int | None) -> str:
         if value is None:
             return "— (< P20)"
         return f"{val:.2f}"
-    if key.endswith("_rate") or key.endswith("_share") or key.endswith("_pct") or key == "xp_surprise_rate" or key == "xp_threat_conversion":
-        if key == "xp_m4_threat_rate" or key.startswith("xp_m4_threat_rate_"):
-            return f"{100 * val:.1f}%"
+    if key.startswith("xp_m4_threat_rate"):
         return f"{100 * val:.1f}%"
-    if key.startswith("xp_m4_per_pass_"):
+    if key.endswith("_rate") or key.endswith("_share") or key.endswith("_pct") or key == "xp_surprise_rate" or key == "xp_threat_conversion":
+        return f"{100 * val:.1f}%"
+    if key.startswith("xp_m4_per_pass_") or key == "xp_m4_per_pass_final_third":
         return f"{val:.3f}"
-    if key.startswith("xp_threat_index") or key.endswith("_index") or key.endswith("_score"):
+    if key == "xp_m4_per_pass":
+        return f"{val:.3f}"
+    if key == "xp_m4_per_threat_pass":
+        return f"{val:.3f}"
+    if key == "threat_passes_p90":
         return f"{val:.2f}"
-    if key == "xp_m4_per_pass" or key == "xp_prog_efficiency" or key == "xp_zone_lift_att_def":
-        return f"{val:.3f}"
+    if key in {
+        "long_balls", "progressive_passes", "final_third_passes",
+        "passes_to_box", "key_passes",
+    }:
+        return f"{val:.1f}"
+    if key == "pass_mean_distance":
+        return f"{val:.1f} m"
+    if key.startswith("xp_residual"):
+        return _format_residual_display(val)
     if key.endswith("_p90") or key == "xp_per_90" or key == "xp_game_mean" or key == "xp_game_std":
         return f"{val:.2f}"
+    if key in {"xp_game_std_adj", "xp_game_std_adj_score"}:
+        return f"{val:+.3f}"
     if key == "xp_pass_cv" or key == "xp_pass_std":
         return f"{val:.3f}"
     if key == "xp_max_pass" or key == "xp_m4_p90":
         return f"{val:.3f}"
+    if key in XP_COMPOSITE_INDEX_KEYS:
+        return f"{val:+.2f}"
+    if key in XP_ARCHETYPE_RADAR_KEYS or key in XP_PROFILE_BAR_KEYS:
+        return f"{val:.1f}"
     return f"{val:.1f}"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build season xP artifacts (ridge model, threat thresholds, Serie B parquet)."""
+"""Build season xP artifacts (global ridge model, threat thresholds, Serie B parquet)."""
 
 from __future__ import annotations
 
