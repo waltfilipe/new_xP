@@ -27,7 +27,7 @@ XP_POSITION_RANK_METRICS: tuple[str, ...] = (
     "xp_m4_total_long",
     "xp_m4_threat_long_p90",
 )
-XP_MODEL_VERSION = "m4_od_12x8_b4_a2_pr0_global_ita_dist30_access_ridge_v5"
+XP_MODEL_VERSION = "m4_od_12x8_b4_a2_pr0_global_ita_laliga_dist30_access_ridge_v6"
 THREAT_QUANTILE = 0.10
 THREAT_PROGRESS_MIN = 0.0
 XP_COL = "xp_m4"

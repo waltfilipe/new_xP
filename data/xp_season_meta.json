@@ -1,8 +1,8 @@
 {
-  "version": "m4_od_12x8_b4_a2_pr0_global_ita_dist30_access_ridge_v5",
+  "version": "m4_od_12x8_b4_a2_pr0_global_ita_laliga_dist30_access_ridge_v6",
   "passes": 119654,
   "completed": 95128,
-  "threats": 9790,
+  "threats": 9795,
   "players": 580,
   "matches": 156
 }
