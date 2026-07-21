@@ -1206,6 +1206,16 @@ def _xp_compare_profile_row_html(
     )
 
 
+def _xp_compare_metric_label_html(label: str, key: str) -> str:
+    tip = (xstats.XP_COMPARE_METRIC_TOOLTIPS.get(key) or "").strip()
+    if not tip:
+        return html.escape(label)
+    return (
+        f'<span class="metric-tip" tabindex="0">{html.escape(label)}'
+        f'<span class="metric-tipbox">{html.escape(tip)}</span></span>'
+    )
+
+
 def _xp_compare_metric_row_html(
     label: str,
     primary: dict,
@@ -1219,7 +1229,7 @@ def _xp_compare_metric_row_html(
     arrow = _cmp_delta_compare_html(p_num, s_num)
     return (
         '<div class="cmp-row cmp-row-secondary">'
-        f'<span class="cmp-cell-label">{html.escape(label)}</span>'
+        f'<span class="cmp-cell-label">{_xp_compare_metric_label_html(label, key)}</span>'
         f"{_xp_compare_value_cell_html(p_val)}"
         f"{_xp_compare_value_cell_html(s_val, arrow_html=arrow)}"
         "</div>"
@@ -6390,14 +6400,7 @@ def _pa_regular_stat_value_tip_html(
 
 def _pa_regular_stat_line_html(source: dict, metric_ranks: dict, key: str) -> str:
     label = XP_PA_REGULAR_STAT_LABELS.get(key, key)
-    tip = (XP_PA_REGULAR_STAT_TOOLTIPS.get(key, "") or "").strip()
-    if tip:
-        label_html = (
-            f'<span class="metric-tip" tabindex="0">{html.escape(label)}'
-            f'<span class="metric-tipbox">{html.escape(tip)}</span></span>'
-        )
-    else:
-        label_html = html.escape(label)
+    label_html = html.escape(label)
     value = _pa_regular_stat_value(source, key)
     badge = _pa_top_badge_html(metric_ranks.get(key))
     rank_info = _pa_regular_stat_rank_info(source, metric_ranks, key)

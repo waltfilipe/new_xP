@@ -575,6 +575,24 @@ XP_COMPARE_METRIC_LABELS: dict[str, str] = {
     "progressive_passes": "Progressivos",
     "final_third_passes": "Terço Final",
 }
+XP_COMPARE_METRIC_TOOLTIPS: dict[str, str] = {
+    "xp_per_90": (
+        "Volume de xP gerado por passe, normalizado por 90 minutos — "
+        "quanto valor ofensivo o jogador produz por jogo."
+    ),
+    "xp_m4_per_pass": (
+        "xP médio por passe — mede a eficiência de cada entrega, "
+        "independente do volume."
+    ),
+    "progressive_passes": (
+        "Passes progressivos bem-sucedidos por 90 minutos — "
+        "entregas que avançam a bola em direção ao gol adversário."
+    ),
+    "final_third_passes": (
+        "Passes completados para o terço final por 90 minutos — "
+        "participação ofensiva na zona de criação."
+    ),
+}
 
 XP_PROFILE_BAR_TOOLTIPS: dict[str, str] = {
     "xp_activity_display": (
