@@ -8,7 +8,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.cm import ScalarMappable
-from matplotlib.colors import Normalize
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from mplsoccer import Pitch
@@ -21,6 +21,10 @@ ARROW_WIDTH = 0.9
 ARROW_HEADWIDTH = 1.3
 ARROW_HEADLENGTH = 1.3
 CMAP_XP = plt.cm.plasma
+# Low xP = cinza, alto xP = vermelho forte.
+CMAP_XP_GRAY_RED = LinearSegmentedColormap.from_list(
+    "xp_gray_red", ["#6b7280", "#9ca3af", "#f87171", "#ef4444", "#b91c1c"]
+)
 
 
 def _base_pitch(*, figsize: tuple[float, float] = (FIG_W, FIG_H), dpi: int = FIG_DPI):
@@ -184,6 +188,7 @@ def _draw_passes_on_pitch(
     xp_col: str | None = "xp_m4",
     highlight_index: int | None = None,
     show_labels: bool = True,
+    cmap=CMAP_XP,
 ) -> None:
     """Draw mplsoccer arrows and origin/destination markers on an existing pitch axis."""
     color_by_xp = xp_col is not None and xp_col in work.columns
@@ -204,7 +209,7 @@ def _draw_passes_on_pitch(
         is_highlight = i == highlight_index
         if color_by_xp and not is_highlight:
             xp_value = float(getattr(row, xp_col))
-            color = CMAP_XP(norm(xp_value))
+            color = cmap(norm(xp_value))
             lw_scale = 0.85 + 0.35 * min(xp_value / XP_PASS_MAX, 1.0)
         elif is_highlight:
             color = "#fbbf24"
@@ -280,6 +285,8 @@ def draw_special_passes_season_map(
     xp_col: str | None = "xp_m4",
     threat_col: str | None = None,
     highlight_index: int | None = None,
+    show_labels: bool = True,
+    cmap=CMAP_XP,
 ):
     """Season map of passes for one special-pass category."""
     fig, ax, pitch = _base_pitch()
@@ -303,20 +310,22 @@ def draw_special_passes_season_map(
         work,
         xp_col=xp_col,
         highlight_index=highlight_index,
+        show_labels=show_labels,
+        cmap=cmap,
     )
 
     if color_by_xp:
         values = work[xp_col].to_numpy(dtype=float)
         vmax = max(float(np.max(values)), 0.05)
         norm = Normalize(vmin=0.0, vmax=min(vmax, XP_PASS_MAX))
-        sm = ScalarMappable(norm=norm, cmap=CMAP_XP)
+        sm = ScalarMappable(norm=norm, cmap=cmap)
         sm.set_array([])
         cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.02)
         cbar.set_label("xP do passe", color="white", fontsize=8)
         cbar.ax.yaxis.set_tick_params(color="white", labelcolor="white")
 
     legend_handles = [
-        Line2D([0], [0], color=CMAP_XP(0.9) if color_by_xp else "#60a5fa", lw=2.0, label="Passe"),
+        Line2D([0], [0], color=cmap(0.9) if color_by_xp else "#60a5fa", lw=2.0, label="Passe"),
         Line2D([0], [0], marker="o", color="w", markerfacecolor="#94a3b8", markersize=5, linestyle="None", label="Origem"),
         Line2D([0], [0], marker="s", color="w", markerfacecolor="#94a3b8", markersize=5, linestyle="None", label="Destino"),
     ]

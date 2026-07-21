@@ -140,7 +140,12 @@ from progression_maps import (
 xpe = _load_xp_study_engine()
 xe = _load_xp_engine()
 xstats = _load_xp_stats_engine()
-from xp_study_maps import draw_special_passes_season_map, draw_top_xp_passes_map, draw_xp_destination_surface
+from xp_study_maps import (
+    CMAP_XP_GRAY_RED as _CMAP_XP_GRAY_RED,
+    draw_special_passes_season_map,
+    draw_top_xp_passes_map,
+    draw_xp_destination_surface,
+)
 
 XP_DATA_CACHE_VERSION = xe.XP_DATA_CACHE_VERSION
 
@@ -7191,46 +7196,28 @@ def render_scatter_section(
         st.info("Selecione uma posição para ver o gráfico.")
         return
 
-    metric_options = xstats.iter_scatter_base_metric_options()
+    metric_options = xstats.iter_scatter_metric_options()
     metric_keys = [key for key, _label in metric_options]
     metric_labels = {key: label for key, label in metric_options}
-    band_keys = [key for key, _label in xstats.SCATTER_BAND_OPTIONS]
-    band_labels = {key: label for key, label in xstats.SCATTER_BAND_OPTIONS}
 
     metric_col, player_col = st.columns([2.1, 1], gap="medium")
     with metric_col:
         axis_x_col, axis_y_col = st.columns(2, gap="small")
         with axis_x_col:
-            x_base_key = st.selectbox(
+            x_key = st.selectbox(
                 "Eixo X",
                 options=metric_keys,
                 format_func=lambda key: metric_labels[key],
-                index=_scatter_default_metric_index(metric_keys, "xp_m4_per_pass"),
+                index=_scatter_default_metric_index(metric_keys, "xp_per_90"),
                 key=SCATTER_X_METRIC_KEY,
             )
-            x_band = st.selectbox(
-                "Faixa X",
-                options=band_keys,
-                format_func=lambda key: band_labels[key],
-                index=0,
-                key=SCATTER_X_BAND_KEY,
-                disabled=x_base_key not in xstats.SCATTER_BANDED_BASE_KEYS,
-            )
         with axis_y_col:
-            y_base_key = st.selectbox(
+            y_key = st.selectbox(
                 "Eixo Y",
                 options=metric_keys,
                 format_func=lambda key: metric_labels[key],
-                index=_scatter_default_metric_index(metric_keys, "xp_m4_total"),
+                index=_scatter_default_metric_index(metric_keys, "xp_m4_per_pass"),
                 key=SCATTER_Y_METRIC_KEY,
-            )
-            y_band = st.selectbox(
-                "Faixa Y",
-                options=band_keys,
-                format_func=lambda key: band_labels[key],
-                index=0,
-                key=SCATTER_Y_BAND_KEY,
-                disabled=y_base_key not in xstats.SCATTER_BANDED_BASE_KEYS,
             )
 
     highlight_player_id: str | None = None
@@ -7274,10 +7261,8 @@ def render_scatter_section(
         SCATTER_POSITION_BLOCKS_KEY,
         blocks=SCATTER_POSITION_BLOCKS,
     )
-    x_key = xstats.resolve_scatter_metric_key(x_base_key, x_band)
-    y_key = xstats.resolve_scatter_metric_key(y_base_key, y_band)
-    x_label = xstats.scatter_axis_label(x_base_key, x_band)
-    y_label = xstats.scatter_axis_label(y_base_key, y_band)
+    x_label = xstats.scatter_metric_label(x_key)
+    y_label = xstats.scatter_metric_label(y_key)
 
     fig = build_stats_scatter_figure(
         pool,
@@ -7305,9 +7290,7 @@ def render_scatter_section(
     )
     st.caption(
         f"{len(pool)} jogadores elegíveis · mínimo P{xstats.DISTANCE_INDEX_MIN_PASS_PERCENTILE} "
-        f"({min_passes_hint or '—'}) · tamanho da bolha = distância média do passe "
-        f"(curto {xstats.DISTANCE_BAND_LABELS['short']} · "
-        f"longo {xstats.DISTANCE_BAND_LABELS['long']})"
+        f"({min_passes_hint or '—'})"
         f"{highlight_hint}"
     )
 
@@ -7384,84 +7367,34 @@ def render_maps_section(
         st.warning("Could not load player profile.")
         return
 
-    filter_col1, filter_col2 = st.columns(2, gap="medium")
-    with filter_col1:
-        map_view = st.selectbox(
-            "Tipo de mapa",
-            options=("special", "threat"),
-            format_func=lambda key: "Special pass" if key == "special" else "xP Threat Passes",
-            key=MAPS_VIEW_TYPE_KEY,
-        )
-    with filter_col2:
-        if map_view == "special":
-            map_filter_key = st.selectbox(
-                "Special pass",
-                options=list(xstats.SPECIAL_PASS_MAP_FILTER_KEYS),
-                format_func=xstats.special_pass_map_label,
-                key=MAPS_SPECIAL_PASS_KEY,
-            )
-            map_category_label = xstats.special_pass_map_label(map_filter_key)
-        else:
-            map_filter_key = st.selectbox(
-                "xP Threat Passes",
-                options=list(xstats.THREAT_PASS_MAP_FILTER_KEYS),
-                format_func=xstats.threat_pass_map_label,
-                key=MAPS_THREAT_BAND_KEY,
-            )
-            map_category_label = f"xP Threat Passes · {xstats.threat_pass_map_label(map_filter_key)}"
+    map_filter_key = st.selectbox(
+        "Tipo de passe",
+        options=[key for key, _label in xstats.MAPS_PASS_TYPE_OPTIONS],
+        format_func=xstats.maps_pass_type_label,
+        key=MAPS_SPECIAL_PASS_KEY,
+    )
+    map_category_label = xstats.maps_pass_type_label(map_filter_key)
 
     st.markdown('<div class="pa-maps-compact">', unsafe_allow_html=True)
     raw_passes = xp_passes_by_player.get(str(player_id))
-    if map_view == "special":
-        passes_df = _filter_special_passes_for_map(raw_passes, map_filter_key)
-    else:
-        passes_df = _filter_threat_passes_for_map(raw_passes, map_filter_key)
+    passes_df = _filter_special_passes_for_map(raw_passes, map_filter_key)
     if passes_df is None or passes_df.empty:
         st.info("Nenhum passe completo para este jogador com o filtro selecionado.")
     else:
         work = _maps_passes_table(passes_df)
-        labels = [_maps_pass_option_label(work.iloc[i], i) for i in range(len(work))]
-        select_key = _maps_pass_select_key(str(player_id), f"{map_view}_{map_filter_key}")
-
-        map_col, panel_col = st.columns([1.7, 1], gap="medium")
-        with panel_col:
-            st.markdown('<div class="pa-maps-detail-panel">', unsafe_allow_html=True)
-            st.markdown("#### Detalhe do passe")
-            selected_label = st.selectbox(
-                "Passe",
-                options=labels,
-                key=select_key,
-            )
-            selected_idx = labels.index(selected_label)
-            row = work.iloc[selected_idx]
-            xp_val = float(row.get("xp_m4") or 0.0)
-            expected_val = float(row.get("xp_expected") or 0.0)
-            residual_val = float(row.get("xp_residual") or (xp_val - expected_val))
-            m1, m2 = st.columns(2)
-            m1.metric("xP", f"{xp_val:.3f}")
-            m2.metric("vs esperado", f"{residual_val:+.3f}")
-            st.caption(f"xP esperado: **{expected_val:.3f}**")
-            st.caption(
-                f"Distância: **{float(row.get('pass_distance') or 0.0):.1f} m** · "
-                f"Jogo: **{html.escape(str(row.get('match_date') or '—'))}**"
-            )
-            st.caption("Números no mapa correspondem à lista acima (ordenada por xP).")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with map_col:
-            fig = draw_special_passes_season_map(
-                work,
-                player_name=str(player.get("player_name", "—")),
-                season_label=APP_LEAGUE,
-                category_label=map_category_label,
-                xp_col="xp_m4",
-                highlight_index=selected_idx,
-            )
-            st.pyplot(fig, clear_figure=True, use_container_width=True)
-
+        fig = draw_special_passes_season_map(
+            work,
+            player_name=str(player.get("player_name", "—")),
+            season_label=APP_LEAGUE,
+            category_label=map_category_label,
+            xp_col="xp_m4",
+            highlight_index=None,
+            show_labels=False,
+            cmap=_CMAP_XP_GRAY_RED,
+        )
+        st.pyplot(fig, clear_figure=True, use_container_width=True)
         st.caption(
-            f"{len(work)} passes completos · círculo = origem · quadrado = destino · "
-            "dourado = passe selecionado"
+            f"{len(work)} passes completos · cor do passe = xP (cinza → vermelho forte)"
         )
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -8178,9 +8111,21 @@ def _render_presentation_maps_demo() -> None:
 
 def _render_pres_flow_steps() -> None:
     steps = [
-        ("Overview", "Understand the layout and browse xP season rankings."),
-        ("Player Analysis", "Deep-dive on a player with xP stats and position ranks."),
-        ("Maps", "Visualize special passes on the pitch with optional xP coloring."),
+        (
+            "Player Analysis",
+            "Escolha posição, arquétipo e jogador para ver o xP Profile, as stats "
+            "regulares e os passes especiais, com rank na posição.",
+        ),
+        (
+            "Dispersão",
+            "Compare os jogadores de uma posição em um gráfico X/Y usando as métricas "
+            "de xP e volume de passes.",
+        ),
+        (
+            "Maps",
+            "Selecione um jogador e um tipo de passe para ver todos no campo, coloridos "
+            "pelo xP (cinza → vermelho forte).",
+        ),
     ]
     items = []
     for idx, (title, text) in enumerate(steps, start=1):
@@ -8191,7 +8136,7 @@ def _render_pres_flow_steps() -> None:
             f'<span class="desc">{html.escape(text)}</span></div>'
         )
     st.markdown(
-        '<div class="pres-card"><h4 style="margin-bottom:0.75rem">App flow</h4>'
+        '<div class="pres-card"><h4 style="margin-bottom:0.75rem">Como usar o dashboard</h4>'
         f'<div class="pres-flow">{"".join(items)}</div></div>',
         unsafe_allow_html=True,
     )
@@ -8206,31 +8151,49 @@ def render_presentation_tab(
     rated: list[dict],
     xp_players: list[dict] | None = None,
 ) -> None:
+    _ = (all_players, passes_by_player, players_by_id, pool_by_position, rated, xp_players)
+
     st.markdown(
         '<div class="pres-card pres-card-hero">'
-        f"<h4>{html.escape(APP_NAME)} — expected threat per pass (xT)</h4>"
-        "<p>We measure pass quality with an <strong>expected threat (xT)</strong> model. "
-        "Passes that increase goal probability score higher. The rating summarizes the player "
-        f"against <strong>position peers</strong> in the {html.escape(APP_LEAGUE)}.</p></div>",
+        f"<h4>{html.escape(APP_NAME)} — valor esperado do passe (xP)</h4>"
+        "<p>O <strong>xP (expected Pass value)</strong> estima o quanto cada passe "
+        "melhora a situação ofensiva da equipe. O modelo aprende, a partir de milhares de "
+        "passes, o valor esperado de uma ação considerando origem, destino e contexto — e "
+        "compara o que o jogador entregou com o que era esperado. "
+        f"Todas as métricas são comparadas com jogadores da <strong>mesma posição</strong> na "
+        f"{html.escape(APP_LEAGUE)}.</p></div>",
         unsafe_allow_html=True,
     )
 
-    _render_pres_feature_cards()
-
-    active_demo = st.session_state.get(PRES_DEMO_KEY)
-    if active_demo:
-        st.markdown('<div class="pres-demo-wrap">', unsafe_allow_html=True)
-        if active_demo == "player_analysis":
-            _render_presentation_player_analysis_demo()
-        elif active_demo == "maps":
-            st.info("Abra a aba Maps para visualizar special passes no campo.")
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown(
+        '<div class="pres-card">'
+        "<h4>Como ler o xP Profile</h4>"
+        "<p>Cada jogador tem quatro dimensões, sempre relativas à posição (escala 3 a 9):</p>"
+        "</div>"
+        '<div class="pres-cards-row">'
+        '<div class="pres-mini-card"><h4>Impacto Geral</h4>'
+        "<p>Com que frequência participa gerando valor (xP por jogo e ações de impacto por jogo).</p></div>"
+        '<div class="pres-mini-card"><h4>Impacto por ação</h4>'
+        "<p>Quanto valor cada passe rende, no passe habitual e nas ações de maior impacto. "
+        "Não é taxa de acerto.</p></div>"
+        '<div class="pres-mini-card"><h4>Entrega vs Esperado</h4>'
+        "<p>Se costuma entregar mais valor do que a situação previa, comparado ao esperado "
+        "para passes de contexto semelhante.</p></div>"
+        "</div>"
+        '<div class="pres-cards-row">'
+        '<div class="pres-mini-card"><h4>Consistência</h4>'
+        "<p>Se mantém o nível de impacto de um jogo para o outro.</p></div>"
+        '<div class="pres-mini-card"><h4>Nota relativa</h4>'
+        "<p>Uma nota alta não é uma quantidade de passes nem um percentual de acerto: é a "
+        "posição do jogador frente aos pares da posição.</p></div>"
+        '<div class="pres-mini-card"><h4>Arquétipos</h4>'
+        "<p>A combinação das quatro dimensões resume o perfil do jogador (Elite, Criativo, "
+        "Segurança, Impacto, Limitado ou Regular).</p></div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
     _render_pres_flow_steps()
-
-    if xp_players:
-        st.markdown("---")
-        render_xp_season_rankings(xp_players)
 
 
 def _render_similarity_player_panel(
@@ -8631,8 +8594,8 @@ def main() -> None:
             xp_passes_by_player = load_xp_passes()
         xp_by_id = {str(p["player_id"]): p for p in xp_players}
 
-    tab_pres, tab_stats, tab_scatter, tab_analysis, tab_maps = st.tabs(
-        ["Overview", "Stats", "Dispersão", "Player Analysis", "Maps"]
+    tab_pres, tab_analysis, tab_scatter, tab_maps = st.tabs(
+        ["Overview", "Player Analysis", "Dispersão", "Maps"]
     )
     with tab_pres:
         render_presentation_tab(
@@ -8642,18 +8605,6 @@ def main() -> None:
             pool_by_position,
             rated=rated,
             xp_players=xp_players,
-        )
-    with tab_stats:
-        render_stats_section(
-            all_players,
-            progression_by_id,
-            xp_by_id=xp_by_id,
-        )
-    with tab_scatter:
-        render_scatter_section(
-            all_players,
-            progression_by_id,
-            xp_by_id=xp_by_id,
         )
     with tab_analysis:
         render_player_analysis_section(
@@ -8667,6 +8618,12 @@ def main() -> None:
             progression_pool_by_position,
             pool_by_position,
             carries_pool_by_position,
+            xp_by_id=xp_by_id,
+        )
+    with tab_scatter:
+        render_scatter_section(
+            all_players,
+            progression_by_id,
             xp_by_id=xp_by_id,
         )
     with tab_maps:

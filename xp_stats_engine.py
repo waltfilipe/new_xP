@@ -150,6 +150,7 @@ def _is_long_pass(scored: pd.DataFrame, dist: np.ndarray) -> np.ndarray:
 
 
 SPECIAL_PASS_MAP_FILTERS: tuple[tuple[str, str], ...] = (
+    ("progressive", "Passes Progressivos"),
     ("diagonal_long", "Diagonal Longa"),
     ("line_break", "Quebra linha"),
     ("inversion", "Inversões"),
@@ -161,6 +162,20 @@ SPECIAL_PASS_MAP_FILTERS: tuple[tuple[str, str], ...] = (
 SPECIAL_PASS_MAP_FILTER_KEYS: tuple[str, ...] = tuple(key for key, _label in SPECIAL_PASS_MAP_FILTERS)
 SPECIAL_PASS_MAP_FILTER_LABELS: dict[str, str] = dict(SPECIAL_PASS_MAP_FILTERS)
 SPECIAL_PASS_COUNT_KEYS: tuple[str, ...] = SPECIAL_PASS_MAP_FILTER_KEYS
+
+# Maps tab — selectable pass types (ordered) with analyst-facing labels.
+MAPS_PASS_TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("progressive", "Passes Progressivos"),
+    ("diagonal_long", "Diagonais Longas"),
+    ("line_break", "Passes Quebra Linha"),
+    ("inversion", "Inversões"),
+    ("cross", "Cruzamentos"),
+)
+MAPS_PASS_TYPE_LABELS: dict[str, str] = dict(MAPS_PASS_TYPE_OPTIONS)
+
+
+def maps_pass_type_label(filter_key: str) -> str:
+    return MAPS_PASS_TYPE_LABELS.get(str(filter_key), str(filter_key))
 
 
 def special_pass_count_key(filter_key: str) -> str:
@@ -212,6 +227,7 @@ def compute_special_pass_masks(scored: pd.DataFrame) -> dict[str, np.ndarray]:
     in_box = _in_penalty_box(x_end, y_end)
 
     return {
+        "progressive": pe._progressive_wyscout_vec(x_start, y_start, x_end, y_end),
         "diagonal_long": (
             long_pass
             & (x_start <= DEF_X_MAX)
@@ -768,6 +784,32 @@ def iter_stats_metric_options() -> tuple[tuple[str, str], ...]:
             if key not in seen:
                 seen[key] = stats_metric_label(key)
     return tuple(seen.items())
+
+
+# Dispersão (scatter) — restricted, analyst-facing metric set.
+SCATTER_METRIC_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("xp_per_90", "xP / jogo"),
+    ("threat_passes_p90", "Ações de impacto / jogo"),
+    ("xp_m4_per_pass", "Impacto por ação · xP / passe"),
+    ("xp_m4_per_threat_pass", "Impacto por ação · xP / ação"),
+    ("xp_residual_median", "Entrega vs esperado · resíduo mediano"),
+    ("xp_game_std_adj_score", "Consistência · estabilidade"),
+    ("long_balls", "Passes longos / jogo"),
+    ("progressive_passes", "Passes progressivos / jogo"),
+    ("special_diagonal_long_p90", "Diagonais longas / jogo"),
+    ("special_line_break_p90", "Passes quebra-linha / jogo"),
+    ("special_inversion_p90", "Inversões / jogo"),
+    ("special_cross_p90", "Cruzamentos / jogo"),
+)
+SCATTER_METRIC_LABELS: dict[str, str] = dict(SCATTER_METRIC_OPTIONS)
+
+
+def iter_scatter_metric_options() -> tuple[tuple[str, str], ...]:
+    return SCATTER_METRIC_OPTIONS
+
+
+def scatter_metric_label(key: str) -> str:
+    return SCATTER_METRIC_LABELS.get(key, stats_metric_label(key))
 
 
 SCATTER_BAND_OPTIONS: tuple[tuple[str, str], ...] = (
@@ -1418,6 +1460,8 @@ def format_stats_value(key: str, value: float | int | None) -> str:
         return f"{val:.3f}"
     if key == "threat_passes_p90":
         return f"{val:.2f}"
+    if key in {"long_balls", "progressive_passes"}:
+        return f"{val:.1f}"
     if key.startswith("xp_residual"):
         return _format_residual_display(val)
     if key.endswith("_p90") or key == "xp_per_90" or key == "xp_game_mean" or key == "xp_game_std":
