@@ -7919,7 +7919,8 @@ def render_estudo_section() -> None:
         f"Pool global: Série B ({meta.get('league_matches_serie_b', '—')}) + "
         f"Série A BR ({meta.get('league_matches_serie_a', '—')}) + "
         f"Premier League ({meta.get('league_matches_premier_league', '—')}) + "
-        f"Serie A Itália ({meta.get('league_matches_italia_seriea', '—')}) = "
+        f"Serie A Itália ({meta.get('league_matches_italia_seriea', '—')}) + "
+        f"La Liga ({meta.get('league_matches_laliga', '—')}) = "
         f"{meta.get('league_matches', '—')} partidas · "
         f"{meta.get('league_passes', 0):,} passes completos."
     )
