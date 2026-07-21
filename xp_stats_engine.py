@@ -468,9 +468,9 @@ XP_PROFILE_BAR_KEYS: tuple[str, ...] = (
 )
 
 XP_PROFILE_BAR_LABELS: dict[str, str] = {
-    "xp_activity_display": "Volume",
-    "xp_edge_display": "Efetividade",
-    "xp_quality_display": "Qualidade",
+    "xp_activity_display": "Impacto Geral",
+    "xp_edge_display": "Impacto por ação",
+    "xp_quality_display": "Entrega vs Esperado",
     "xp_consistency_display": "Consistência",
 }
 
@@ -485,17 +485,31 @@ XP_PROFILE_BAR_METRICS: dict[str, tuple[str, ...]] = {
     ),
     "xp_quality_display": (
         "xp_residual_median",
+        "xp_surprise_rate",
     ),
     "xp_consistency_display": (
         "xp_game_std_adj_score",
+        "xp_games_above_median_pct",
     ),
 }
 
 XP_PROFILE_BAR_TOOLTIPS: dict[str, str] = {
-    "xp_activity_display": "Mediana do rank na posição entre xP/jogo e threats/jogo.",
-    "xp_edge_display": "Mediana do rank na posição entre xP/passe e xP/threat.",
-    "xp_quality_display": "Resíduo mediano por passe (xP real − esperado), ×100.",
-    "xp_consistency_display": "Estabilidade de xP entre jogos, ajustada pelo nível médio.",
+    "xp_activity_display": (
+        "Média do rank na posição de xP/jogo e ações de impacto/jogo — "
+        "com que frequência participa gerando valor."
+    ),
+    "xp_edge_display": (
+        "Média do rank na posição de xP/passe e xP/ação de impacto — "
+        "quanto valor cada ação rende."
+    ),
+    "xp_quality_display": (
+        "Média do rank na posição do ganho típico e da frequência de passes "
+        "acima do valor esperado — se entrega mais do que a situação previa."
+    ),
+    "xp_consistency_display": (
+        "Média do rank na posição da estabilidade entre jogos e da frequência "
+        "de jogos fortes — se mantém o nível de partida para partida."
+    ),
 }
 
 XP_PROFILE_ARCHETYPE_KEYS: tuple[str, ...] = (
@@ -612,9 +626,11 @@ FINISHER_METRICS: tuple[str, ...] = (
 )
 QUALITY_METRICS: tuple[str, ...] = (
     "xp_residual_median",
+    "xp_surprise_rate",
 )
 CONSISTENCY_METRICS: tuple[str, ...] = (
     "xp_game_std_adj_score",
+    "xp_games_above_median_pct",
 )
 CONSISTENCY_INVERT_METRICS: tuple[str, ...] = ()
 
@@ -1066,25 +1082,28 @@ def attach_composite_indices(players: list[dict]) -> None:
             "xp_creator_index": _mean_z_columns(df, CREATOR_METRICS),
             "xp_progressor_index": _mean_z_columns(df, PROGRESSOR_METRICS),
             "xp_finisher_pass_index": _mean_z_columns(df, FINISHER_METRICS),
-            "xp_quality_index": _mean_z_columns(df, QUALITY_METRICS),
-            "xp_consistency_index": _mean_z_columns(df, CONSISTENCY_METRICS),
         }
         display_map = {
             "xp_builder_index": "xp_archetype_builder_display",
             "xp_creator_index": "xp_archetype_creator_display",
             "xp_progressor_index": "xp_archetype_progressor_display",
             "xp_finisher_pass_index": "xp_archetype_finisher_display",
-            "xp_quality_index": "xp_quality_display",
-            "xp_consistency_index": "xp_consistency_display",
         }
         for raw_key, composite in composites.items():
             _attach_index_display_scores(rows, raw_key, display_map[raw_key], composite)
 
+        # Profile bars: average of within-position ranks of their component metrics.
         _attach_median_rank_display_scores(
             rows, ACTIVITY_METRICS, "xp_activity_index", "xp_activity_display"
         )
         _attach_median_rank_display_scores(
             rows, EDGE_METRICS, "xp_edge_index", "xp_edge_display"
+        )
+        _attach_median_rank_display_scores(
+            rows, QUALITY_METRICS, "xp_quality_index", "xp_quality_display"
+        )
+        _attach_median_rank_display_scores(
+            rows, CONSISTENCY_METRICS, "xp_consistency_index", "xp_consistency_display"
         )
         _attach_xp_profile_archetypes(rows)
 

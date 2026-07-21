@@ -3359,15 +3359,16 @@ st.markdown(
         left: 50%;
         bottom: calc(100% + 8px);
         transform: translateX(-50%);
-        min-width: 11.5rem;
-        padding: 0.45rem 0.55rem;
+        min-width: 13rem;
+        max-width: 17rem;
+        padding: 0.5rem 0.6rem;
         border-radius: 8px;
         border: 1px solid #334155;
         background: rgba(15, 23, 42, 0.96);
         color: #e2e8f0;
         font-size: 0.72rem;
         line-height: 1.35;
-        white-space: nowrap;
+        white-space: normal;
         box-shadow: 0 10px 24px rgba(2, 6, 23, 0.45);
         opacity: 0;
         visibility: hidden;
@@ -3384,10 +3385,27 @@ st.markdown(
         letter-spacing: 0.06em;
         text-transform: uppercase;
     }
-    .pa-xp-gradient-bar-tip-line {
+    .pa-xp-gradient-bar-tip-summary {
         display: block;
-        color: #cbd5e1;
+        margin-bottom: 0.4rem;
+        color: #94a3b8;
+        font-size: 0.68rem;
+        font-weight: 500;
+        line-height: 1.3;
+    }
+    .pa-xp-gradient-bar-tip-line {
+        display: flex;
+        flex-direction: column;
+        margin-top: 0.28rem;
+    }
+    .pa-xp-gradient-bar-tip-metric {
+        color: #e2e8f0;
         font-size: 0.72rem;
+        font-weight: 600;
+    }
+    .pa-xp-gradient-bar-tip-rank {
+        color: #7dd3fc;
+        font-size: 0.66rem;
         font-weight: 600;
     }
     .pa-xp-gradient-bar-tip:hover .pa-xp-gradient-bar-tipbox,
@@ -5466,14 +5484,30 @@ def _xp_gradient_bar_tier(pct: float) -> str:
     return "cool"
 
 
+def _xp_gradient_bar_metric_rank_html(xp_profile: dict, key: str) -> str:
+    rank = xp_profile.get(f"{key}_rank_in_group")
+    total = xp_profile.get(f"{key}_rank_pool_in_group")
+    if not rank or not total:
+        return ""
+    group = position_group_label(str(xp_profile.get("position_group") or "—"))
+    return (
+        '<span class="pa-xp-gradient-bar-tip-rank">'
+        f"#{int(rank)} de {int(total)} · {html.escape(group)}"
+        "</span>"
+    )
+
+
 def _xp_gradient_bar_tooltip_html(xp_profile: dict, display_key: str) -> str:
     title = xstats.XP_PROFILE_BAR_LABELS.get(display_key, display_key)
     metric_keys = xstats.XP_PROFILE_BAR_METRICS.get(display_key, ())
     summary = xstats.XP_PROFILE_BAR_TOOLTIPS.get(display_key, "")
     lines = "".join(
         '<span class="pa-xp-gradient-bar-tip-line">'
-        f'{html.escape(xstats.stats_metric_label(key))}: '
+        '<span class="pa-xp-gradient-bar-tip-metric">'
+        f'{html.escape(xstats.pa_stats_metric_label(key))}: '
         f'{html.escape(xstats.format_pa_stats_value(key, xp_profile.get(key)))}'
+        "</span>"
+        f"{_xp_gradient_bar_metric_rank_html(xp_profile, key)}"
         "</span>"
         for key in metric_keys
     )
@@ -5585,11 +5619,9 @@ def _xp_profile_score_column_html(xp_profile: dict | None) -> str:
     if not xp_profile:
         return ""
     bars_html = _xp_profile_bars_html(xp_profile)
-    archetype_html = _xp_profile_archetype_html(xp_profile, as_title=True)
-    title_html = archetype_html or '<p class="pa-xp-profile-title">xP Profile</p>'
     return (
         '<div class="player-card pa-xp-profile-card">'
-        f"{title_html}"
+        '<p class="pa-xp-profile-title">xP Profile</p>'
         f"{bars_html}"
         "</div>"
     )
@@ -5765,18 +5797,152 @@ def _xp_section_grade_accordion_html(
     )
 
 
+XP_PA_REGULAR_STAT_KEYS: tuple[str, ...] = (
+    "passes_total",
+    "pass_completion_pct",
+    "long_balls",
+    "long_ball_completion_pct",
+    "progressive_passes",
+    "progressive_pass_pct",
+)
+
+XP_PA_REGULAR_STAT_LABELS: dict[str, str] = {
+    "passes_total": "Passes (por jogo)",
+    "pass_completion_pct": "% Passes certos",
+    "long_balls": "Passes longos (por jogo)",
+    "long_ball_completion_pct": "% Passes longos",
+    "progressive_passes": "Passes progressivos (por jogo)",
+    "progressive_pass_pct": "% Passes progressivos",
+}
+
+XP_PA_REGULAR_STAT_TOOLTIPS: dict[str, str] = {
+    "passes_total": "Passes tentados por 90 minutos.",
+    "pass_completion_pct": "Percentual de passes completados.",
+    "long_balls": "Passes longos (≥30 m) por 90 minutos.",
+    "long_ball_completion_pct": "Percentual de passes longos completados.",
+    "progressive_passes": "Passes progressivos bem-sucedidos por 90 minutos.",
+    "progressive_pass_pct": "Percentual dos passes completados que avançam a jogada.",
+}
+
+XP_PA_REGULAR_STAT_KIND: dict[str, str] = {
+    "passes_total": "p90",
+    "pass_completion_pct": "pct",
+    "long_balls": "p90",
+    "long_ball_completion_pct": "pct",
+    "progressive_passes": "p90",
+    "progressive_pass_pct": "pct",
+}
+
+# (special-pass filter key, per-game label, xP-per-pass label, xP total key)
+XP_PA_SPECIAL_STATS: tuple[tuple[str, str, str, str], ...] = (
+    ("diagonal_long", "Diagonais longas (por jogo)", "xP/DL", "xp_diagonal_long_total"),
+    ("line_break", "Passes quebra-linha (por jogo)", "xP/QL", "xp_line_break_total"),
+    ("inversion", "Inversões (por jogo)", "xP/Inv", "xp_inversion_total"),
+    ("cross", "Cruzamentos (por jogo)", "xP/Cruz", "xp_cross_total"),
+)
+
+
+def _pa_simple_stat_value(value: float | int | None, kind: str) -> str:
+    if value is None:
+        return "—"
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if kind == "pct":
+        return f"{val:.1f}%"
+    if kind == "xp":
+        return f"{val:.3f}"
+    return f"{val:.1f}"
+
+
+def _pa_regular_stat_value(player: dict, key: str) -> str:
+    if key == "progressive_pass_pct":
+        passes = float(player.get("passes_total") or 0.0)
+        prog = float(player.get("progressive_passes") or 0.0)
+        if passes <= 0:
+            return "—"
+        return _pa_simple_stat_value(prog / passes * 100.0, "pct")
+    return _pa_simple_stat_value(player.get(key), XP_PA_REGULAR_STAT_KIND.get(key, "p90"))
+
+
+def _pa_regular_stats_panel_html(player: dict | None) -> str:
+    profile = player or {}
+    metric_ranks = profile.get("metric_ranks") if isinstance(profile.get("metric_ranks"), dict) else {}
+    lines = "".join(
+        _metric_line_html(
+            XP_PA_REGULAR_STAT_LABELS[key],
+            key,
+            _pa_regular_stat_value(profile, key),
+            metric_ranks,
+            show_rank=True,
+            label_fn=lambda k: XP_PA_REGULAR_STAT_LABELS.get(k, k),
+            tooltip_fn=lambda k: XP_PA_REGULAR_STAT_TOOLTIPS.get(k, ""),
+            rank_in_group_fn=pg_rank_in_group_label,
+        )
+        for key in XP_PA_REGULAR_STAT_KEYS
+    )
+    return (
+        '<div class="pa-xp-section-panel">'
+        '<div class="pa-xp-section-title">Regular Stats</div>'
+        f'<div class="pa-xp-section-body">{lines}</div>'
+        "</div>"
+    )
+
+
+def _pa_special_stats_panel_html(xp_profile: dict | None) -> str:
+    profile = xp_profile or {}
+    p90_keys = tuple(
+        xstats.special_pass_per_game_key(sp) for sp, _lbl, _xlbl, _tot in XP_PA_SPECIAL_STATS
+    )
+    metric_ranks = _xp_stats_metric_ranks_dict(profile, p90_keys)
+    lines: list[str] = []
+    for sp, per_game_label, xp_label, xp_total_key in XP_PA_SPECIAL_STATS:
+        p90_key = xstats.special_pass_per_game_key(sp)
+        count = float(profile.get(xstats.special_pass_count_key(sp)) or 0.0)
+        xp_total = float(profile.get(xp_total_key) or 0.0)
+        per_pass = (xp_total / count) if count > 0 else None
+        lines.append(
+            _metric_line_html(
+                per_game_label,
+                p90_key,
+                _pa_simple_stat_value(profile.get(p90_key), "p90"),
+                metric_ranks,
+                show_rank=True,
+                label_fn=lambda _k, _lbl=per_game_label: _lbl,
+                tooltip_fn=lambda _k: "",
+                rank_in_group_fn=_xp_rank_in_group_label,
+            )
+        )
+        lines.append(
+            _metric_line_html(
+                xp_label,
+                "",
+                _pa_simple_stat_value(per_pass, "xp"),
+                {},
+                show_rank=False,
+            )
+        )
+    body = "".join(lines)
+    return (
+        '<div class="pa-xp-section-panel">'
+        '<div class="pa-xp-section-title">Special Stats</div>'
+        f'<div class="pa-xp-section-body">{body}</div>'
+        "</div>"
+    )
+
+
 def _build_xp_stats_card_html(
     xp_profile: dict | None,
     player: dict | None = None,
 ) -> str:
-    profile = xp_profile or {}
-    passing_sections = "".join(
-        _pa_xp_section_panel_html(profile, section_title, keys)
-        for section_title, keys in xstats.XP_PLAYER_ANALYSIS_BLOCKS
-    )
+    regular_html = _pa_regular_stats_panel_html(player)
+    special_html = _pa_special_stats_panel_html(xp_profile)
     return (
         '<div class="player-card pa-pillars-card">'
-        f'<div class="pa-pillars-stack"><div class="pa-pillar-group">{passing_sections}</div></div>'
+        '<div class="pa-pillars-stack"><div class="pa-pillar-group">'
+        f"{regular_html}{special_html}"
+        "</div></div>"
         "</div>"
     )
 
