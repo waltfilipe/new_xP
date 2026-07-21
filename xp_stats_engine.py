@@ -678,6 +678,12 @@ XP_PASS_RATING_FEATURES: tuple[str, ...] = (
 )
 XP_PASS_RATING_TANH_SCALE = 1.25
 XP_PASS_RATING_TANH_AMPLITUDE = 1.15
+XP_PASS_RATING_PERCENTILE_BANDS: tuple[tuple[float, float, float], ...] = (
+    # (max_rank_pct, score_at_band_start, score_at_band_end) — rank 1 = lowest pct.
+    (0.10, 9.0, 8.0),   # top 10%
+    (0.30, 8.0, 7.0),   # 10–30%
+    (1.00, 7.0, 4.5),   # rest
+)
 
 BUILDER_BASE_METRICS: tuple[str, ...] = (
     "xp_line_break_total",
@@ -1301,12 +1307,32 @@ def _xp_pass_rating_tanh_display(z_score: float) -> float:
     )
 
 
-def attach_xp_pass_ratings(players: list[dict]) -> None:
-    """Attach compressed xP pass rating (6-axis PCA + pass shrinkage + confidence).
+def xp_pass_rating_percentile_display(rank: int, pool_size: int) -> float:
+    """Map within-position rank to a 4.5–9.0 display score.
 
-    PC1 combines within-position z-scores of:
-    xP/passe, xP/threat, xP/jogo, threats/jogo, resíduo mediano and estabilidade ajustada.
-    Raw metrics are shrunk toward the position mean using passes (or minutes for p90 metrics).
+    Top 10% -> 8.0–9.0, 10–30% -> 7.0–8.0, rest -> 4.5–7.0.
+    """
+    if pool_size <= 0 or rank <= 0:
+        return pe.RATING_DISPLAY_MID
+    pct = float(rank) / float(pool_size)
+    prev_pct = 0.0
+    for max_pct, score_start, score_end in XP_PASS_RATING_PERCENTILE_BANDS:
+        if pct <= max_pct:
+            span = max_pct - prev_pct
+            if span <= 0:
+                return score_end
+            t = (pct - prev_pct) / span
+            return score_start - t * (score_start - score_end)
+        prev_pct = max_pct
+    return XP_PASS_RATING_PERCENTILE_BANDS[-1][2]
+
+
+def attach_xp_pass_ratings(players: list[dict]) -> None:
+    """Attach xP pass rating (6-axis PCA + shrinkage) with percentile display.
+
+    PC1 combines within-position z-scores of core xP metrics. Players are ranked
+    by the confidence-adjusted internal composite; the displayed grade maps that
+    rank to a 4.5–9.0 scale (top 10% -> 8–9, 10–30% -> 7–8, rest -> 4.5–7).
     """
     if not players:
         return
@@ -1348,12 +1374,10 @@ def attach_xp_pass_ratings(players: list[dict]) -> None:
         for player, raw_display, pca_z in zip(rows, raw_displays, pca_scores):
             player["position_p25_passes"] = round(p25_passes, 1)
             confidence = pe._rating_confidence(player)
-            adjusted, uncertainty = pe._apply_rating_confidence(raw_display, confidence)
+            adjusted, _ = pe._apply_rating_confidence(raw_display, confidence)
             adjusted_displays.append(adjusted)
             player["xp_pass_rating_raw_display"] = round(raw_display, 2)
             player["xp_pass_rating_confidence"] = round(confidence, 4)
-            player["xp_pass_rating_uncertainty"] = round(uncertainty, 2)
-            player["xp_pass_rating"] = round(adjusted / 10.0, 4)
             player["xp_pass_rating_pca_z"] = round(float(pca_z), 4)
 
         ranked = sorted(
@@ -1364,6 +1388,12 @@ def attach_xp_pass_ratings(players: list[dict]) -> None:
         for rank, (row, _display) in enumerate(ranked, start=1):
             row["xp_pass_rating_rank_in_group"] = rank
             row["xp_pass_rating_rank_pool_in_group"] = pool_size
+            pct_display = xp_pass_rating_percentile_display(rank, pool_size)
+            confidence = float(row.get("xp_pass_rating_confidence") or 0.0)
+            adjusted, uncertainty = pe._apply_rating_confidence(pct_display, confidence)
+            row["xp_pass_rating_percentile_display"] = round(pct_display, 2)
+            row["xp_pass_rating_uncertainty"] = round(uncertainty, 2)
+            row["xp_pass_rating"] = round(adjusted / 10.0, 4)
             metric_ranks = row.get("metric_ranks")
             if not isinstance(metric_ranks, dict):
                 metric_ranks = {}

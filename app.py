@@ -5342,8 +5342,8 @@ def _placeholder_rating_block_html(label: str) -> str:
 
 
 def _xp_pass_grade_pct(display_score: float) -> float:
-    """Map compressed pass grade (~4.5–7.5) to gradient position."""
-    return max(0.0, min(100.0, (display_score - 4.5) / 3.0 * 100.0))
+    """Map pass grade (4.5–9.0 percentile scale) to gradient position."""
+    return max(0.0, min(100.0, (display_score - 4.5) / 4.5 * 100.0))
 
 
 def _pass_grade_gradient_color(pct: float) -> str:
