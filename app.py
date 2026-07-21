@@ -2572,7 +2572,7 @@ st.markdown(
         height: var(--pa-card-h);
         min-height: var(--pa-card-h);
         max-height: var(--pa-card-h);
-        overflow: hidden;
+        overflow: visible;
         box-sizing: border-box;
     }
     .pa-xp-profile-card {
@@ -3267,7 +3267,7 @@ st.markdown(
         width: 100%;
         height: 20px;
         border-radius: 999px;
-        overflow: hidden;
+        overflow: visible;
         background: linear-gradient(
             90deg,
             #f1f5f9 0%,
@@ -3293,6 +3293,15 @@ st.markdown(
             rgba(0, 0, 0, 0.12) 100%
         );
         pointer-events: none;
+    }
+    /* Clips only the blurred glow to the rounded track; tooltip escapes freely. */
+    .pa-xp-gradient-bar-clip {
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 1;
     }
     .pa-xp-gradient-bar-track.pa-xp-gradient-bar-empty {
         background: linear-gradient(90deg, #334155 0%, #475569 100%);
@@ -3351,6 +3360,7 @@ st.markdown(
         transform: translate(-50%, -50%);
         z-index: 5;
         display: inline-flex;
+        pointer-events: auto;
     }
     .pa-xp-gradient-bar-tip .pa-xp-gradient-bar-marker {
         position: relative;
@@ -3358,6 +3368,18 @@ st.markdown(
         left: auto;
         transform: none;
         cursor: help;
+        pointer-events: auto;
+    }
+    /* Enlarged invisible hit area so the tooltip is easy to trigger. */
+    .pa-xp-gradient-bar-tip::before {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 30px;
+        height: 30px;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
     }
     .pa-xp-gradient-bar-tipbox {
         position: absolute;
@@ -5573,15 +5595,32 @@ def _xp_gradient_bar_tooltip_html(xp_profile: dict, display_key: str) -> str:
     )
 
 
+def _xp_gradient_bar_tooltip_plain(xp_profile: dict, display_key: str) -> str:
+    """Plain-text tooltip used as a native title fallback."""
+    title = xstats.XP_PROFILE_BAR_LABELS.get(display_key, display_key)
+    parts: list[str] = [str(title)]
+    for key in xstats.XP_PROFILE_BAR_METRICS.get(display_key, ()):
+        label = xstats.pa_stats_metric_label(key)
+        value = xstats.format_pa_stats_value(key, xp_profile.get(key))
+        rank = xp_profile.get(f"{key}_rank_in_group")
+        total = xp_profile.get(f"{key}_rank_pool_in_group")
+        if rank and total:
+            parts.append(f"{label}: {value} (#{int(rank)} de {int(total)})")
+        else:
+            parts.append(f"{label}: {value}")
+    return " · ".join(parts)
+
+
 def _xp_gradient_bar_marker_html(
     pct: float,
     xp_profile: dict,
     display_key: str,
 ) -> str:
     tooltip = _xp_gradient_bar_tooltip_html(xp_profile, display_key)
+    plain = html.escape(_xp_gradient_bar_tooltip_plain(xp_profile, display_key), quote=True)
     return (
-        f'<span class="pa-xp-gradient-bar-tip" style="left:{pct:.1f}%">'
-        '<span class="pa-xp-gradient-bar-marker" tabindex="0"></span>'
+        f'<span class="pa-xp-gradient-bar-tip" style="left:{pct:.1f}%" tabindex="0" title="{plain}">'
+        '<span class="pa-xp-gradient-bar-marker"></span>'
         f'<span class="pa-xp-gradient-bar-tipbox">{tooltip}</span>'
         "</span>"
     )
@@ -5604,7 +5643,9 @@ def _xp_gradient_bar_row_html(label: str, display_key: str, xp_profile: dict) ->
         track_html = (
             f'<div class="pa-xp-gradient-bar-shell pa-xp-gradient-bar-tier-{tier}">'
             '<div class="pa-xp-gradient-bar-track">'
+            '<span class="pa-xp-gradient-bar-clip">'
             f'<span class="pa-xp-gradient-bar-glow" style="left:{pct:.1f}%"></span>'
+            "</span>"
             f"{marker_html}"
             "</div>"
             '<div class="pa-xp-gradient-bar-ticks" aria-hidden="true">'
