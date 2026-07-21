@@ -171,7 +171,6 @@ STATS_POSITION_BLOCKS_KEY = "stats_position_blocks"
 PA_URL_PLAYER_KEY = "_pa_url_player_id"
 PA_USER_PLAYER_PICK_KEY = "_pa_user_player_pick"
 PA_USER_POSITION_PICK_KEY = "_pa_user_position_pick"
-PA_ARCHETYPE_FILTER_KEY = "pa_archetype_filter"
 MAPS_SHORT_PASS_ONLY_KEY = "maps_short_pass_only"
 MAPS_XP_THREAT_ONLY_KEY = "maps_xp_threat_only"
 MAPS_VIEW_TYPE_KEY = "maps_view_type"
@@ -1118,6 +1117,109 @@ def _progression_compare_stats_html(
     return "".join(rows)
 
 
+def _xp_compare_display_value(xp_profile: dict, key: str) -> str:
+    if key == "xp_pass_rating":
+        return fmt_rating_score(xp_profile.get(key))
+    if key in xstats.XP_PROFILE_BAR_KEYS:
+        val = xp_profile.get(key)
+        if val is None:
+            return "—"
+        return f"{float(val):.1f}"
+    return _xp_stat_display(xp_profile, key)
+
+
+def _xp_compare_numeric_value(xp_profile: dict, key: str) -> float | None:
+    if key == "xp_pass_rating":
+        val = xp_profile.get(key)
+        if val is None:
+            return None
+        return float(val) * 10.0
+    if key in xstats.XP_PROFILE_BAR_KEYS:
+        val = xp_profile.get(key)
+        if val is None:
+            return None
+        return float(val)
+    return _xp_stat_numeric_value(xp_profile, key)
+
+
+def _xp_compare_metric_label(key: str) -> str:
+    if key in xstats.XP_COMPARE_EXTRA_LABELS:
+        return xstats.XP_COMPARE_EXTRA_LABELS[key]
+    if key in xstats.XP_PROFILE_BAR_KEYS:
+        return xstats.XP_PROFILE_BAR_LABELS[key]
+    return xstats.pa_stats_metric_label(key)
+
+
+def _xp_compare_mini_bar_html(score: float | None) -> str:
+    if score is None:
+        return ""
+    pct = max(0.0, min(100.0, (float(score) - 3.0) / 6.0 * 100.0))
+    color = score_display_color(float(score))
+    tier = "hot" if pct >= 72.0 else "warm" if pct >= 45.0 else "cool"
+    return (
+        f'<span class="pa-xp-compare-mini-bar pa-xp-compare-mini-bar-{tier}">'
+        f'<span class="pa-xp-compare-mini-bar-fill" style="width:{pct:.0f}%;background:{color}"></span>'
+        "</span>"
+    )
+
+
+def _xp_compare_value_cell_html(
+    value: str,
+    *,
+    delta_html: str = "",
+    rank_html: str = "",
+    mini_bar_html: str = "",
+) -> str:
+    bar_block = f'<span class="pa-xp-compare-mini-bar-wrap">{mini_bar_html}</span>' if mini_bar_html else ""
+    return (
+        "<span>"
+        f'<span class="cmp-value-wrap pa-xp-compare-value-wrap">'
+        f'<span class="cmp-cell-value">{value}</span>{delta_html}'
+        f"{bar_block}"
+        "</span>"
+        f'{rank_html if rank_html else ""}'
+        "</span>"
+    )
+
+
+def _xp_compare_rank_html(rank_n: int | float | None, position_group: str | None) -> str:
+    if not rank_n:
+        return ""
+    return (
+        f'<span class="cmp-rank-note">{html.escape(_xp_rank_in_group_label(int(rank_n), position_group))}</span>'
+    )
+
+
+def _xp_compare_metric_row_html(
+    label: str,
+    primary_xp: dict,
+    secondary_xp: dict,
+    key: str,
+    *,
+    primary_group: str | None,
+    secondary_group: str | None,
+    row_class: str = "",
+    show_mini_bar: bool = False,
+) -> str:
+    p_val = html.escape(_xp_compare_display_value(primary_xp, key))
+    s_val = html.escape(_xp_compare_display_value(secondary_xp, key))
+    p_num = _xp_compare_numeric_value(primary_xp, key)
+    s_num = _xp_compare_numeric_value(secondary_xp, key)
+    s_delta = _cmp_stat_pct_delta_html(s_num, p_num)
+    p_rank = _xp_compare_rank_html(primary_xp.get(f"{key}_rank_in_group"), primary_group)
+    s_rank = _xp_compare_rank_html(secondary_xp.get(f"{key}_rank_in_group"), secondary_group)
+    p_bar = _xp_compare_mini_bar_html(p_num) if show_mini_bar else ""
+    s_bar = _xp_compare_mini_bar_html(s_num) if show_mini_bar else ""
+    row_cls = f"cmp-row {row_class}".strip()
+    return (
+        f'<div class="{row_cls}">'
+        f'<span class="cmp-cell-label">{html.escape(label)}</span>'
+        f"{_xp_compare_value_cell_html(p_val, rank_html=p_rank, mini_bar_html=p_bar)}"
+        f"{_xp_compare_value_cell_html(s_val, delta_html=s_delta, rank_html=s_rank, mini_bar_html=s_bar)}"
+        "</div>"
+    )
+
+
 def _xp_compare_stats_html(
     primary_xp: dict,
     secondary_xp: dict,
@@ -1130,51 +1232,67 @@ def _xp_compare_stats_html(
     primary_name = html.escape(str(primary_name or "Player A"))
     secondary_name = html.escape(str(secondary_name or "Player B"))
     rows = [
-        '<div class="player-card">',
+        '<div class="player-card pa-xp-compare-card">',
+        '<div class="pa-xp-compare-legend">',
+        f'<span class="pa-xp-compare-legend-primary">{primary_name}</span>',
+        f'<span class="pa-xp-compare-legend-secondary">{secondary_name}</span>',
+        "</div>",
         '<div class="cmp-row cmp-row-head">',
-        "<span>Métrica</span>",
+        "<span>Dimensão</span>",
         f"<span>{primary_name}</span>",
         f"<span>{secondary_name}</span>",
         "</div>",
+        '<div class="cmp-row cmp-row-section">',
+        '<span class="cmp-cell-label cmp-section-label">Visão geral</span>',
+        "<span></span>",
+        "<span></span>",
+        "</div>",
     ]
-    for section_title, keys in XP_COMPARE_SECTIONS:
+    for key in xstats.XP_COMPARE_EXTRA_METRICS:
+        rows.append(
+            _xp_compare_metric_row_html(
+                _xp_compare_metric_label(key),
+                primary_xp,
+                secondary_xp,
+                key,
+                primary_group=primary_group,
+                secondary_group=secondary_group,
+                row_class="cmp-row-metric",
+            )
+        )
+
+    for bar_key in xstats.XP_PROFILE_BAR_KEYS:
+        section_label = xstats.XP_PROFILE_BAR_LABELS.get(bar_key, bar_key)
         rows.extend([
-            '<div class="cmp-row cmp-row-section">',
-            f'<span class="cmp-cell-label cmp-section-label">{html.escape(section_title)}</span>',
+            '<div class="cmp-row cmp-row-section cmp-row-bar-section">',
+            f'<span class="cmp-cell-label cmp-section-label">{html.escape(section_label)}</span>',
             "<span></span>",
             "<span></span>",
             "</div>",
+            _xp_compare_metric_row_html(
+                "Nota do perfil",
+                primary_xp,
+                secondary_xp,
+                bar_key,
+                primary_group=primary_group,
+                secondary_group=secondary_group,
+                row_class="cmp-row-bar-main",
+                show_mini_bar=True,
+            ),
         ])
-        for key in keys:
-            label = html.escape(_xp_metric_label(key))
-            p_val = html.escape(_xp_stat_display(primary_xp, key))
-            s_val = html.escape(_xp_stat_display(secondary_xp, key))
-            p_num = _xp_stat_numeric_value(primary_xp, key)
-            s_num = _xp_stat_numeric_value(secondary_xp, key)
-            s_delta = _cmp_stat_pct_delta_html(s_num, p_num)
-            p_rank = ""
-            s_rank = ""
-            p_rank_n = primary_xp.get(f"{key}_rank_in_group")
-            s_rank_n = secondary_xp.get(f"{key}_rank_in_group")
-            if p_rank_n:
-                p_rank = html.escape(_xp_rank_in_group_label(int(p_rank_n), primary_group))
-            if s_rank_n:
-                s_rank = html.escape(_xp_rank_in_group_label(int(s_rank_n), secondary_group))
-            rows.extend([
-                '<div class="cmp-row">',
-                f'<span class="cmp-cell-label">{label}</span>',
-                (
-                    f'<span><span class="cmp-value-wrap">'
-                    f'<span class="cmp-cell-value">{p_val}</span></span>'
-                    f'{"<span class=\"cmp-rank-note\">" + p_rank + "</span>" if p_rank else ""}</span>'
-                ),
-                (
-                    f'<span><span class="cmp-value-wrap">'
-                    f'<span class="cmp-cell-value">{s_val}</span>{s_delta}</span>'
-                    f'{"<span class=\"cmp-rank-note\">" + s_rank + "</span>" if s_rank else ""}</span>'
-                ),
-                "</div>",
-            ])
+        for metric_key in xstats.XP_PROFILE_BAR_METRICS.get(bar_key, ()):
+            rows.append(
+                _xp_compare_metric_row_html(
+                    xstats.pa_stats_metric_label(metric_key),
+                    primary_xp,
+                    secondary_xp,
+                    metric_key,
+                    primary_group=primary_group,
+                    secondary_group=secondary_group,
+                    row_class="cmp-row-sub",
+                )
+            )
+
     rows.append("</div>")
     return "".join(rows)
 
@@ -1207,8 +1325,8 @@ def _render_xp_comparison_panel(
         st.info(f"Nenhum outro jogador disponível no grupo {pool_label} para comparação.")
         return
 
-    st.markdown("### Comparação xP")
-    st.caption(f"Comparando dentro do grupo: {pool_label}.")
+    st.markdown("### Comparar")
+    st.caption(f"Mesmo grupo de posição: {pool_label}.")
 
     labels = [o[3] for o in options]
     id_by_label = {o[3]: o[0] for o in options}
@@ -2266,6 +2384,84 @@ st.markdown(
     .cmp-delta.down { color: #f87171; }
     .cmp-delta.flat { color: #475569; }
     .cmp-value-wrap { display: inline-flex; align-items: center; }
+    .pa-xp-compare-card {
+        padding: 1rem 1.1rem 0.85rem;
+    }
+    .pa-xp-compare-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1.25rem;
+        margin-bottom: 0.85rem;
+        padding-bottom: 0.65rem;
+        border-bottom: 1px solid #243049;
+    }
+    .pa-xp-compare-legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        font-size: 0.88rem;
+        font-weight: 700;
+        color: #e2e8f0;
+    }
+    .pa-xp-compare-legend span::before {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        flex-shrink: 0;
+    }
+    .pa-xp-compare-legend-primary::before { background: #a78bfa; }
+    .pa-xp-compare-legend-secondary::before { background: #86efac; }
+    .cmp-row-bar-section {
+        background: linear-gradient(90deg, rgba(147, 197, 253, 0.08), transparent 72%);
+        border-radius: 8px;
+        margin-top: 0.35rem;
+        padding-top: 0.5rem;
+    }
+    .cmp-row-bar-main {
+        background: rgba(15, 23, 42, 0.45);
+        border-bottom-color: #243049;
+    }
+    .cmp-row-bar-main .cmp-cell-label {
+        color: #f8fafc;
+        font-weight: 700;
+    }
+    .cmp-row-sub .cmp-cell-label {
+        padding-left: 0.85rem;
+        color: #94a3b8;
+        font-size: 0.8rem;
+    }
+    .cmp-row-sub {
+        padding-top: 0.28rem;
+        padding-bottom: 0.28rem;
+    }
+    .cmp-row-sub .cmp-cell-value {
+        font-size: 0.95rem;
+        font-weight: 600;
+    }
+    .pa-xp-compare-value-wrap {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.28rem;
+    }
+    .pa-xp-compare-mini-bar-wrap {
+        display: block;
+        width: 100%;
+        max-width: 120px;
+    }
+    .pa-xp-compare-mini-bar {
+        display: block;
+        width: 100%;
+        height: 6px;
+        border-radius: 999px;
+        background: #1e293b;
+        overflow: hidden;
+    }
+    .pa-xp-compare-mini-bar-fill {
+        display: block;
+        height: 100%;
+        border-radius: 999px;
+    }
     .stat-section-row {
         display: flex;
         justify-content: space-between;
@@ -4185,7 +4381,6 @@ def _player_analysis_options(
     xp_by_id: dict[str, dict] | None = None,
     exclude_player_id: str | None = None,
     sort_by: str = "xp_pass_rating",
-    archetype_filter: str | None = None,
 ) -> list[tuple[str, str, str, str]]:
     """Player slicer options ranked within selected position blocks."""
     ranked_rows: list[tuple[str, str, str, float]] = []
@@ -4201,10 +4396,6 @@ def _player_analysis_options(
         ):
             continue
         xp_profile = (xp_by_id or {}).get(pid, {})
-        if archetype_filter:
-            player_archetype = str(xp_profile.get("xp_profile_archetype") or "")
-            if player_archetype != str(archetype_filter):
-                continue
         if sort_by == "dist_index_mean":
             sort_val = xp_profile.get("xp_dist_index_mean")
             sort_key = float(sort_val) if sort_val is not None else float("-inf")
@@ -4236,16 +4427,6 @@ def _player_analysis_options(
     return options
 
 
-def _xp_profile_archetype_filter_options() -> list[tuple[str, str]]:
-    return [
-        (xstats.XP_PROFILE_ARCHETYPE_FILTER_ALL, "Todos os arquétipos"),
-        *(
-            (key, xstats.XP_PROFILE_ARCHETYPE_LABELS[key])
-            for key in xstats.XP_PROFILE_ARCHETYPE_KEYS
-        ),
-    ]
-
-
 def _render_shared_player_slicers(
     all_players: list[dict],
     progression_by_id: dict[str, dict],
@@ -4259,42 +4440,18 @@ def _render_shared_player_slicers(
     """Position block slicer + player selectbox. Returns selected player_id or None."""
     blocks_state_key = state_key or _position_blocks_state_key(key_prefix)
     map_id_key = _player_map_id_key(key_prefix)
-    use_archetype_slicer = key_prefix == "pa" and xp_by_id is not None
-    archetype_filter: str | None = None
     with st.container():
         st.markdown('<div class="pa-slicer-panel">', unsafe_allow_html=True)
-        if use_archetype_slicer:
-            pos_col, archetype_col, player_col = st.columns([1.05, 0.9, 1.2], gap="medium")
-        else:
-            pos_col, player_col = st.columns([1, 1], gap="medium")
-            archetype_col = None
+        pos_col, player_col = st.columns([1, 1], gap="medium")
         with pos_col:
             with st.container(key=f"{key_prefix}_position_slicer"):
                 position_codes, position_groups = _render_position_block_slicer(
                     key_prefix=key_prefix,
                     state_key=blocks_state_key,
                 )
-        if archetype_col is not None:
-            with archetype_col:
-                with st.container(key="pa_archetype_slicer"):
-                    filter_options = _xp_profile_archetype_filter_options()
-                    filter_keys = [option[0] for option in filter_options]
-                    filter_labels = {key: label for key, label in filter_options}
-                    selected_archetype = st.selectbox(
-                        "Arquétipo",
-                        options=filter_keys,
-                        format_func=lambda key: filter_labels.get(key, key),
-                        key=PA_ARCHETYPE_FILTER_KEY,
-                    )
         selected_label = None
         id_by_label: dict[str, str] = {}
         with player_col:
-            if use_archetype_slicer:
-                selected_arch = st.session_state.get(
-                    PA_ARCHETYPE_FILTER_KEY,
-                    xstats.XP_PROFILE_ARCHETYPE_FILTER_ALL,
-                )
-                archetype_filter = selected_arch or None
             with st.container(key=f"{key_prefix}_player_slicer"):
                 if not position_codes and not position_groups:
                     st.info("Selecione uma posição para filtrar jogadores.")
@@ -4307,7 +4464,6 @@ def _render_shared_player_slicers(
                     position_groups=position_groups,
                     xp_by_id=xp_by_id,
                     sort_by=sort_by,
-                    archetype_filter=archetype_filter,
                 )
                 if not options:
                     st.info("Nenhum jogador disponível para os filtros selecionados.")
@@ -5467,8 +5623,6 @@ XP_PASSING_SECTION_SPECS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = tu
     (f"pa_{title.lower().replace(' ', '_').replace('ç', 'c').replace('ã', 'a')}", title, "", keys)
     for title, keys in xstats.XP_PLAYER_ANALYSIS_BLOCKS
 )
-
-XP_COMPARE_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = xstats.XP_PLAYER_ANALYSIS_BLOCKS
 
 
 def _xp_metric_label(key: str) -> str:

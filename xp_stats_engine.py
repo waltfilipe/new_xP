@@ -554,6 +554,21 @@ XP_PROFILE_BAR_METRICS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# Player Analysis compare panel — profile bars plus headline xP metrics.
+XP_COMPARE_EXTRA_METRICS: tuple[str, ...] = (
+    "xp_pass_rating",
+    "xp_m4_total",
+    "xp_per_90",
+    "xp_m4_threat_rate",
+)
+
+XP_COMPARE_EXTRA_LABELS: dict[str, str] = {
+    "xp_pass_rating": "Pass Rating",
+    "xp_m4_total": "xP total",
+    "xp_per_90": "xP / jogo",
+    "xp_m4_threat_rate": "% threats",
+}
+
 XP_PROFILE_BAR_TOOLTIPS: dict[str, str] = {
     "xp_activity_display": (
         "Média do rank na posição de xP/jogo e ações de impacto/jogo — "
